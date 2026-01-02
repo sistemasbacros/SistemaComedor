@@ -1,0 +1,605 @@
+<script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+<script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css"></script>
+
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- <title>Bootstrap Example</title> -->
+  <!-- <meta charset="utf-8"> -->
+  <!-- <meta name="viewport" content="width=device-width, initial-scale=1"> -->
+  <!-- <link href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css" rel="stylesheet"> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script> -->
+  
+  <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+<script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+<link href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css" rel="stylesheet">
+  <script type="text/javascript" src="https://fastly.jsdelivr.net/npm/echarts@5.4.2/dist/echarts.min.js"></script>
+  
+  <style>
+body {
+  font-family: 'Lato', sans-serif;
+  background-color: rgba(245, 245, 245);
+   background-image: url("bkg-blu.jpg");
+}
+
+
+
+</style>
+  <meta charset="UTF-8">
+</head>
+
+<body >
+<p><a href="Demo_SistemaComedor.html">Menu principal</a></p>
+   <label for="html">Mes</label>
+	<select name="Mes" id="Mes">
+    <option value="Enero">Enero</option>
+    <option value="Febrero">Febrero</option>
+	 <option value="Marzo">Marzo</option>
+	  <option value="Abril">Abril</option>
+	   <option value="Mayo">Mayo</option>
+	    <option value="Junio">Junio</option>
+		 <option value="Julio">Julio</option>
+		  <option value="Agosto">Agosto</option>
+		   <option value="Septiembre">Septiembre</option>
+		    <option value="Octubre">Octubre</option>
+			<option value="Noviembre">Noviembre</option>
+<option value="Diciembre">Diciembre</option>
+</select>
+	<br>
+			<br>
+
+   <label for="html">Semana</label>
+	<select name="Semana" id="Semana">
+	<option value="Semana1">Semana 1</option>
+	<option value="Semana1">Semana 2</option>
+	<option value="Semana1">Semana 3</option>
+	<option value="Semana1">Semana 4</option>
+	</select>
+		<br>
+				<br>
+
+	  <input type="submit" name="submit" value="Consultar">  
+<div>
+<div id="container" style="height:50%;width:50%;display:block;float: left;"></div>
+<div id="main"      style="height:50%;width:50%;display:block;float: right;"></div>
+</div>
+<div style="height:50%;width:50%;float: left;">
+<table id="example" class="display" width="50%" ></table>
+</div>
+
+<div>
+<div id="main1" style="height:50%;width:50%;display:block;float: right;"></div>
+</div>
+
+
+<div>
+<div id="main2" style="height:50%;width:50%;display:block;float: right;"></div>
+</div>
+
+
+</body>
+</html>
+
+  <script type="text/javascript">
+   
+var chartDom = document.getElementById('main');
+var myChart = echarts.init(chartDom);
+var option;
+
+option = {
+  title: {
+    text: 'Personal',
+    subtext: 'Datos semanales',
+    left: 'center'
+  },
+  tooltip: {
+    trigger: 'item'
+  },
+  legend: {
+    orient: 'vertical',
+    left: 'left'
+  },
+  series: [
+    {
+      name: 'Datos comedor',
+      type: 'pie',
+      radius: '50%',
+      data: [
+        { value: 1048, name: 'Sistemas' },
+        { value: 735, name: 'Administración' },
+        { value: 580, name: 'Licitación' },
+        { value: 484, name: 'TI' },
+        { value: 300, name: 'Operaciones' }
+      ],
+      emphasis: {
+        itemStyle: {
+          shadowBlur: 10,
+          shadowOffsetX: 0,
+          shadowColor: 'rgba(0, 0, 0, 0.5)'
+        }
+      }
+    }
+  ]
+};
+
+option && myChart.setOption(option);
+  
+  
+    var dom = document.getElementById('container');
+    var myChart = echarts.init(dom, null, {
+      renderer: 'canvas',
+      useDirtyRect: false
+    });
+    var app = {};
+    
+    var option;
+
+    const posList = [
+  'left',
+  'right',
+  'top',
+  'bottom',
+  'inside',
+  'insideTop',
+  'insideLeft',
+  'insideRight',
+  'insideBottom',
+  'insideTopLeft',
+  'insideTopRight',
+  'insideBottomLeft',
+  'insideBottomRight'
+];
+app.configParameters = {
+  rotate: {
+    min: -90,
+    max: 90
+  },
+  align: {
+    options: {
+      left: 'left',
+      center: 'center',
+      right: 'right'
+    }
+  },
+  verticalAlign: {
+    options: {
+      top: 'top',
+      middle: 'middle',
+      bottom: 'bottom'
+    }
+  },
+  position: {
+    options: posList.reduce(function (map, pos) {
+      map[pos] = pos;
+      return map;
+    }, {})
+  },
+  distance: {
+    min: 0,
+    max: 100
+  }
+};
+app.config = {
+  rotate: 90,
+  align: 'left',
+  verticalAlign: 'middle',
+  position: 'insideBottom',
+  distance: 15,
+  onChange: function () {
+    const labelOption = {
+      rotate: app.config.rotate,
+      align: app.config.align,
+      verticalAlign: app.config.verticalAlign,
+      position: app.config.position,
+      distance: app.config.distance
+    };
+    myChart.setOption({
+      series: [
+        {
+          label: labelOption
+        },
+        {
+          label: labelOption
+        },
+        {
+          label: labelOption
+        },
+        {
+          label: labelOption
+        }
+      ]
+    });
+  }
+};
+const labelOption = {
+  show: true,
+  position: app.config.position,
+  distance: app.config.distance,
+  align: app.config.align,
+  verticalAlign: app.config.verticalAlign,
+  rotate: app.config.rotate,
+  formatter: '{c}  {name|{a}}',
+  fontSize: 16,
+  rich: {
+    name: {}
+  }
+};
+option = {
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: {
+      type: 'shadow'
+    }
+  },
+  legend: {
+    data: ['Operación', 'Administración', 'Licitación', 'TI']
+  },
+  toolbox: {
+    show: true,
+    orient: 'vertical',
+    left: 'right',
+    top: 'center',
+    feature: {
+      mark: { show: true },
+      <!-- dataView: { show: true, readOnly: false }, -->
+      <!-- magicType: { show: true, type: ['line', 'bar', 'stack'] }, -->
+      restore: { show: true },
+      saveAsImage: { show: true }
+    }
+  },
+  xAxis: [
+    {
+      type: 'category',
+      axisTick: { show: false },
+      data: ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes']
+    }
+  ],
+  yAxis: [
+    {
+      type: 'value'
+    }
+  ],
+  series: [
+    {
+      name: 'Operación',
+      type: 'bar',
+      barGap: 0,
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [320, 332, 301, 334, 390]
+    },
+    {
+      name: 'Administración',
+      type: 'bar',
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [220, 182, 191, 234, 290]
+    },
+    {
+      name: 'Licitación',
+      type: 'bar',
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [150, 232, 201, 154, 190]
+    },
+    {
+      name: 'TI',
+      type: 'bar',
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [98, 77, 101, 99, 40]
+    }
+  ]
+};
+
+    if (option && typeof option === 'object') {
+      myChart.setOption(option);
+    }
+
+    window.addEventListener('resize', myChart.resize);
+	
+	/////
+	
+	
+var chartDom = document.getElementById('main1');
+var myChart = echarts.init(chartDom);
+var option;
+
+option = {
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: {
+      // Use axis to trigger tooltip
+      type: 'shadow' // 'shadow' as default; can also be 'line' or 'shadow'
+    }
+  },
+  legend: {},
+  grid: {
+    left: '3%',
+    right: '4%',
+    bottom: '3%',
+    containLabel: true
+  },
+  xAxis: {
+    type: 'value',
+	 axisLabel: {
+        formatter: '${value}'
+      }
+  },
+  yAxis: {
+    type: 'category',
+    data: ['Semana 1','Semana 2','Semana 3','Semana 4']
+  },
+  series: [
+    {
+      name: 'Carnicería',
+      type: 'bar',
+      stack: 'total',
+      label: {
+        show: true,
+		formatter: function(d) {
+		// Create our number formatter.
+const formatter = new Intl.NumberFormat('es-MX', {
+  style: 'currency',
+  currency: 'MXN',
+
+  // These options are needed to round to whole numbers if that's what you want.
+  //minimumFractionDigits: 0, // (this suffices for whole numbers, but will print 2500.10 as $2,500.1)
+  //maximumFractionDigits: 0, // (causes 2500.99 to be printed as $2,501)
+});
+        return  formatter.format(d.data);
+      }
+      },
+      emphasis: {
+        focus: 'series'
+      },
+      data: [320, 302, 301, 334, 390, 330, 320]
+    },
+    {
+      name: 'Frutas',
+      type: 'bar',
+      stack: 'total',
+      label: {
+        show: true	,formatter: function(d) {
+		// Create our number formatter.
+const formatter = new Intl.NumberFormat('es-MX', {
+  style: 'currency',
+  currency: 'MXN',
+
+  // These options are needed to round to whole numbers if that's what you want.
+  //minimumFractionDigits: 0, // (this suffices for whole numbers, but will print 2500.10 as $2,500.1)
+  //maximumFractionDigits: 0, // (causes 2500.99 to be printed as $2,501)
+});
+        return  formatter.format(d.data);
+      }
+      },
+      emphasis: {
+        focus: 'series'
+      },
+      data: [120, 132, 101, 134, 90, 230, 210]
+    },
+    {
+      name: 'Verduras',
+      type: 'bar',
+      stack: 'total',
+      label: {
+        show: true,formatter: function(d) {
+		// Create our number formatter.
+const formatter = new Intl.NumberFormat('es-MX', {
+  style: 'currency',
+  currency: 'MXN',
+
+  // These options are needed to round to whole numbers if that's what you want.
+  //minimumFractionDigits: 0, // (this suffices for whole numbers, but will print 2500.10 as $2,500.1)
+  //maximumFractionDigits: 0, // (causes 2500.99 to be printed as $2,501)
+});
+        return  formatter.format(d.data);
+      }
+      },
+      emphasis: {
+        focus: 'series'
+      },
+      data: [220, 182, 191, 234, 290, 330, 310]
+    },
+    {
+      name: 'Lácteos',
+      type: 'bar',
+      stack: 'total',
+      label: {
+        show: true,formatter: function(d) {
+		// Create our number formatter.
+const formatter = new Intl.NumberFormat('es-MX', {
+  style: 'currency',
+  currency: 'MXN',
+
+  // These options are needed to round to whole numbers if that's what you want.
+  //minimumFractionDigits: 0, // (this suffices for whole numbers, but will print 2500.10 as $2,500.1)
+  //maximumFractionDigits: 0, // (causes 2500.99 to be printed as $2,501)
+});
+        return  formatter.format(d.data);
+      }
+      },
+      emphasis: {
+        focus: 'series'
+      },
+      data: [150, 212, 201, 154, 190, 330, 410]
+    },
+    {
+      name: 'Accesorios',
+      type: 'bar',
+      stack: 'total',
+      label: {
+        show: true,formatter: function(d) {
+		// Create our number formatter.
+const formatter = new Intl.NumberFormat('es-MX', {
+  style: 'currency',
+  currency: 'MXN',
+
+  // These options are needed to round to whole numbers if that's what you want.
+  //minimumFractionDigits: 0, // (this suffices for whole numbers, but will print 2500.10 as $2,500.1)
+  //maximumFractionDigits: 0, // (causes 2500.99 to be printed as $2,501)
+});
+        return  formatter.format(d.data);
+      }
+      },
+      emphasis: {
+        focus: 'series'
+      },
+      data: [820, 832, 901, 934, 1290, 1330, 1320]
+    }
+  ]
+};
+option && myChart.setOption(option);
+
+
+////////////////////////// Gráfica 4
+
+
+var chartDom = document.getElementById('main2');
+var myChart = echarts.init(chartDom);
+var option;
+
+option = {
+  tooltip: {
+    trigger: 'item'
+  },
+  legend: {
+    top: '5%',
+    left: 'center'
+  },
+  series: [
+    {
+      name: 'Total de platillos servidos',
+      type: 'pie',
+      radius: ['40%', '70%'],
+      avoidLabelOverlap: false,
+      itemStyle: {
+        borderRadius: 10,
+        borderColor: '#fff',
+        borderWidth: 2
+      },
+      label: {
+        show: false,
+        position: 'center'
+      },
+      emphasis: {
+        label: {
+          show: true,
+          fontSize: 40,
+          fontWeight: 'bold'
+        }
+      },
+      labelLine: {
+        show: false
+      },
+      data: [
+        { value: 1048, name: 'Enero'},
+        { value: 735, name: 'Febrero'},
+        { value: 580, name: 'Marzo'},
+        { value: 484, name: 'Abril'},
+        { value: 300, name: 'Mayo'},
+		{ value: 300, name: 'Junio'},
+		{ value: 300, name: 'Julio'},
+		{ value: 300, name: 'Agosto'},
+		{ value: 300, name: 'Septiembre'},
+		{ value: 300, name: 'Octubre'},
+		{ value: 300, name: 'Noviembre'},
+		{ value: 300, name: 'Diciembre'},
+      ]
+    }
+  ]
+};
+
+option && myChart.setOption(option);
+
+
+	
+  </script>
+
+
+
+
+
+<script>
+var dataSet = [
+    ['Tiger Nixon', 'System Architect', 'Edinburgh', '5421', '2011/04/25', '$320,800'],
+    ['Garrett Winters', 'Accountant', 'Tokyo', '8422', '2011/07/25', '$170,750'],
+    ['Ashton Cox', 'Junior Technical Author', 'San Francisco', '1562', '2009/01/12', '$86,000'],
+    ['Cedric Kelly', 'Senior Javascript Developer', 'Edinburgh', '6224', '2012/03/29', '$433,060'],
+    ['Airi Satou', 'Accountant', 'Tokyo', '5407', '2008/11/28', '$162,700'],
+    ['Brielle Williamson', 'Integration Specialist', 'New York', '4804', '2012/12/02', '$372,000'],
+    ['Herrod Chandler', 'Sales Assistant', 'San Francisco', '9608', '2012/08/06', '$137,500'],
+    ['Rhona Davidson', 'Integration Specialist', 'Tokyo', '6200', '2010/10/14', '$327,900'],
+    ['Colleen Hurst', 'Javascript Developer', 'San Francisco', '2360', '2009/09/15', '$205,500'],
+    ['Sonya Frost', 'Software Engineer', 'Edinburgh', '1667', '2008/12/13', '$103,600'],
+    ['Jena Gaines', 'Office Manager', 'London', '3814', '2008/12/19', '$90,560'],
+    ['Quinn Flynn', 'Support Lead', 'Edinburgh', '9497', '2013/03/03', '$342,000'],
+    ['Charde Marshall', 'Regional Director', 'San Francisco', '6741', '2008/10/16', '$470,600'],
+    ['Haley Kennedy', 'Senior Marketing Designer', 'London', '3597', '2012/12/18', '$313,500'],
+    ['Tatyana Fitzpatrick', 'Regional Director', 'London', '1965', '2010/03/17', '$385,750'],
+    ['Michael Silva', 'Marketing Designer', 'London', '1581', '2012/11/27', '$198,500'],
+    ['Paul Byrd', 'Chief Financial Officer (CFO)', 'New York', '3059', '2010/06/09', '$725,000'],
+    ['Gloria Little', 'Systems Administrator', 'New York', '1721', '2009/04/10', '$237,500'],
+    ['Bradley Greer', 'Software Engineer', 'London', '2558', '2012/10/13', '$132,000'],
+    ['Dai Rios', 'Personnel Lead', 'Edinburgh', '2290', '2012/09/26', '$217,500'],
+    ['Jenette Caldwell', 'Development Lead', 'New York', '1937', '2011/09/03', '$345,000'],
+    ['Yuri Berry', 'Chief Marketing Officer (CMO)', 'New York', '6154', '2009/06/25', '$675,000'],
+    ['Caesar Vance', 'Pre-Sales Support', 'New York', '8330', '2011/12/12', '$106,450'],
+    ['Doris Wilder', 'Sales Assistant', 'Sydney', '3023', '2010/09/20', '$85,600'],
+    ['Angelica Ramos', 'Chief Executive Officer (CEO)', 'London', '5797', '2009/10/09', '$1,200,000'],
+    ['Gavin Joyce', 'Developer', 'Edinburgh', '8822', '2010/12/22', '$92,575'],
+    ['Jennifer Chang', 'Regional Director', 'Singapore', '9239', '2010/11/14', '$357,650'],
+    ['Brenden Wagner', 'Software Engineer', 'San Francisco', '1314', '2011/06/07', '$206,850'],
+    ['Fiona Green', 'Chief Operating Officer (COO)', 'San Francisco', '2947', '2010/03/11', '$850,000'],
+    ['Shou Itou', 'Regional Marketing', 'Tokyo', '8899', '2011/08/14', '$163,000'],
+    ['Michelle House', 'Integration Specialist', 'Sydney', '2769', '2011/06/02', '$95,400'],
+    ['Suki Burks', 'Developer', 'London', '6832', '2009/10/22', '$114,500'],
+    ['Prescott Bartlett', 'Technical Author', 'London', '3606', '2011/05/07', '$145,000'],
+    ['Gavin Cortez', 'Team Leader', 'San Francisco', '2860', '2008/10/26', '$235,500'],
+    ['Martena Mccray', 'Post-Sales support', 'Edinburgh', '8240', '2011/03/09', '$324,050'],
+    ['Unity Butler', 'Marketing Designer', 'San Francisco', '5384', '2009/12/09', '$85,675'],
+];
+ 
+$(document).ready(function () {
+    $('#example').DataTable({
+        data: dataSet,
+        columns: [
+            { title: 'Nombre' },
+            { title: 'Posición' },
+            { title: 'Oficina' },
+            { title: 'Telefono' },
+            { title: 'Fecha' },
+            { title: 'Costo platillo' },
+        ],
+    });
+});
+
+
+<!-- Campos cuadrantes tableros. -->
+<!-- Id_Empleado Nombre Área Costo_Platillo Nombre_Platillo Est_Checador Fecha -->
+
+<!-- Campos cuadrantes tableros. -->
+<!-- Id_Empleado Nombre Área Costo_Platillo Nombre_Platillo Est_Checador Fecha -->
+
+<!-- Cuadrante 1 -->
+<!-- Datos generales por área -->
+
+<!-- Cuadrante 2 -->
+<!-- Totales de compras -->
+
+<!-- Cuadrante 3 -->
+<!-- Cuadrante mensual -->
+
+</script>
+
+
+

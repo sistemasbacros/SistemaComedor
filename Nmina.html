@@ -1,0 +1,353 @@
+<script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+<script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+<script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css"></script>
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- <title>Bootstrap Example</title> -->
+  <!-- <meta charset="utf-8"> -->
+  <!-- <meta name="viewport" content="width=device-width, initial-scale=1"> -->
+  <!-- <link href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css" rel="stylesheet"> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script> -->
+  
+<script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+<script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+<link href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css" rel="stylesheet">
+<script type="text/javascript" src="https://fastly.jsdelivr.net/npm/echarts@5.4.2/dist/echarts.min.js"></script>
+<script type="text/javascript" src="https://unpkg.com/xlsx@0.15.1/dist/xlsx.full.min.js"></script>
+  
+  <style>
+body {
+  font-family: 'Lato', sans-serif;
+  background-color: rgba(245, 245, 245);
+   background-image: url("bkg-blu.jpg");
+}
+</style>
+  <meta charset="UTF-8">
+</head>
+
+<body >
+<p><a href="Demo_SistemaComedor.html">Menú principal</a></p>
+<button onclick="ExportToExcel('xlsx')">Exporta tu tabla a excel</button>
+
+<div id="main" style="height:45%"></div>
+
+<table id="example" class="display" width="50%"></table>
+</body>
+</html>
+
+
+
+<script type="text/javascript">
+ 
+var app = {};
+
+var chartDom = document.getElementById('main');
+var myChart = echarts.init(chartDom);
+var option;
+
+const posList = [
+  'left',
+  'right',
+  'top',
+  'bottom',
+  'inside',
+  'insideTop',
+  'insideLeft',
+  'insideRight',
+  'insideBottom',
+  'insideTopLeft',
+  'insideTopRight',
+  'insideBottomLeft',
+  'insideBottomRight'
+];
+app.configParameters = {
+  rotate: {
+    min: -90,
+    max: 90
+  },
+  align: {
+    options: {
+      left: 'left',
+      center: 'center',
+      right: 'right'
+    }
+  },
+  verticalAlign: {
+    options: {
+      top: 'top',
+      middle: 'middle',
+      bottom: 'bottom'
+    }
+  },
+  position: {
+    options: posList.reduce(function (map, pos) {
+      map[pos] = pos;
+      return map;
+    }, {})
+  },
+  distance: {
+    min: 0,
+    max: 100
+  }
+};
+app.config = {
+  rotate: 90,
+  align: 'left',
+  verticalAlign: 'middle',
+  position: 'insideBottom',
+  distance: 15,
+  onChange: function () {
+    const labelOption = {
+      rotate: app.config.rotate,
+      align: app.config.align,
+      verticalAlign: app.config.verticalAlign,
+      position: app.config.position,
+      distance: app.config.distance
+    };
+    myChart.setOption({
+      series: [
+        {
+          label: labelOption
+        },
+        {
+          label: labelOption
+        },
+        {
+          label: labelOption
+        },
+        {
+          label: labelOption
+        }
+      ]
+    });
+  }
+};
+const labelOption = {
+  show: true,
+  position: app.config.position,
+  distance: app.config.distance,
+  align: app.config.align,
+  verticalAlign: app.config.verticalAlign,
+  rotate: app.config.rotate,
+  formatter: '{c}  {name|{a}}',
+  fontSize: 16,
+  rich: {
+    name: {}
+  }
+};
+option = {
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: {
+      type: 'shadow'
+    }
+  },
+  legend: {
+    data: ['Día 1', 'Día 2', 'Día 3', 'Día 4','Día 5']
+  },
+  toolbox: {
+    show: true,
+    orient: 'vertical',
+    left: 'right',
+    top: 'center',
+    feature: {
+      mark: { show: true },
+      <!-- dataView: { show: true, readOnly: false }, -->
+      <!-- magicType: { show: true, type: ['line', 'bar', 'stack'] }, -->
+      restore: { show: true },
+      saveAsImage: { show: true }
+    }
+  },
+  xAxis: [
+    {
+      type: 'category',
+      axisTick: { show: false },
+      data: ['Semana 1', 'Semana 2', 'Semana 3', 'Semena 4']
+    }
+  ],
+  yAxis: [
+    {
+      type: 'value'
+    }
+  ],
+  series: [
+    {
+      name: 'Día 1',
+      type: 'bar',
+      barGap: 0,
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [320, 332, 301, 334, 390]
+    },
+    {
+      name: 'Día 2',
+      type: 'bar',
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [220, 182, 191, 234, 290]
+    },
+    {
+      name: 'Día 3',
+      type: 'bar',
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [150, 232, 201, 154, 190]
+    },
+    {
+      name: 'Día 4',
+      type: 'bar',
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [98, 77, 101, 99, 40]
+    },
+    {
+      name: 'Día 5',
+      type: 'bar',
+      label: labelOption,
+      emphasis: {
+        focus: 'series'
+      },
+      data: [98, 77, 101, 99, 40]
+    }
+  ]
+};
+
+option && myChart.setOption(option);
+</script>
+
+
+<script>
+var dataSet = [
+['ANLEX NIETO','1','1','1','1','1','1','1','1','','','','','8',''],
+['MIGUEL ANGEL  LUNA  CASTRO','','','1','1','2','2','1','1','','','','','8','14'],
+['ROSA CARMONA NAVA','','','','','0','0','0','2','','','','','2','78'],
+['MARIA DEL CARMEN CASTILLO COLIN','','','','','1','0','0','','','','','','1',''],
+['MIRIAM CIENEGA JASSO','','','1','1','0','0','0','2','','','','','4','22'],
+['LUIS ALBERTO DIONISIO ESPINOZA','','','','1','0','2','1','1','','','','','5',''],
+['REBECA GONZALEZ AVILES','','','','1','1','','1','','','','','','3','16'],
+['EDGAR GUTIERREZ ESQUIVEL   (2 COMIDAS CONDONADAS)','','','','1','0','0','0','1','','','','','2',''],
+['ENRIQUE MEDINA DE JESUS','','','','','1','0','0','','','','','','1',''],
+['JOSE LUIS MEDINA DE JESUS','','','','','1','0','0','1','','','','','2',''],
+['NORMA ANGELICA REYES FONSECA (SUBSIDIADO POR EL ING. MIGUEL)','','','2','','0','0','0','','','','','','2',''],
+['MARTIN SANTOS SAAVEDRA PEREZ','','','','','0','2','0','','','','','','2',''],
+['ISMAEL SOTO DEL HOYO','','','','','1','0','0','','','','','','1',''],
+['DIANA VALDEZ AGUIRRE','','','1','','0','0','0','','','','','','1','60'],
+['JAZMIN AVILES AGUIRRE','','','','','1','2','2','1','','','','','6','8'],
+['DANIELA ALVAREZ REYES','','','','','1','1','1','2','','','','','5','8'],
+['MARISOL BERNAL JUAREZ','','','','','1','','2','1','','','','','4','40'],
+['ROJER MILTON PEREZ MIRANDA','','','','','1','1','1','1','','','','','4','40'],
+['MANUEL ALEJANDRO GARCIA  TERAN','','','','','1','','2','2','','','','','5',''],
+['OFELIA AGUIRRE FLORES','','','1','','0','2','0','2','','','','','5',''],
+['ANA VIANEY PINEDA JUAREZ ','','','','','0','0','0','','','','','','0',''],
+['OSCAR DANIEL BARRIOS SANCHEZ','','','1','','1','0','0','','','','','','2',''],
+['SERGIO ALEGRIA RITO','','','','','2','0','0','','','','','','2',''],
+['LIC. MIGUEL CRUZ RODRIGUEZ','','','','','0','0','0','','','','','','0',''],
+['ING. MIGUEL CRUZ BARRAGAN','','','','','0','0','0','','','','','','0',''],
+['LEONARDO CRUZ BARRAGAN','','','','','0','0','0','','','','','','0',''],
+['THOMAS IVAN MUNDO','','','','','0','0','0','','','','','','0',''],
+['ROSA ESPERANZA BARRIOS SANCHEZ','','','2','','2','2','1','2','2','','','','11',''],
+['LORENA GONZALEZ','','','','','2','2','2','','','','','','6',''],
+['MISAEL HERNANDEZ','','','','','2','2','2','2','','','','','8',''],
+['ULISES RUIZ JIMENEZ','','','','','2','','1','','','','','','3',''],
+['ROQUE LEON PEREIDA','','','','','2','2','2','2','','','','','8',''],
+['ALEJANDRO CRUZ RODRIGUEZ','','','','','0','0','0','','','','','','0',''],
+['ENRIQUE TORRES','','','','','2','2','2','2','','','','','8',''],
+['BEATRIZ GONZALEZ CERNA','','','','','2','','1','1','','','','','4','12'],
+['CONCEPCION ELIZABETH FABELA  QUINTERO  (SUBSIDIADO POR EL LIC. MIGUEL 50%)','','','','','0','0','0','','','','','','0','26'],
+['EDUARDO RAMIREZ (SUBSIDIADO 100% LIC. MIGUEL)','','','','','0','0','0','','','','','','0',''],
+['MIGUELANGEL RAMIREZ (SUBSISDIADO 100 LIC. MIGUEL)','','','','','0','0','0','','','','','','0',''],
+['MARIANA CITLALI HERRERA HERNANDEZ','','','1','','1','0','0','2','','','','','4',''],
+['LINNETT BENITEZ','','','','','2','2','2','2','','','','','8',''],
+['ROGELIO NAVA DE JESUS','','','','','1','0','2','2','','','','','5',''],
+['OSCAR FABILA GARDUÑO','','','','','0','0','0','','','','','','0',''],
+['ULISES FLORES BUSTAMANTE','','','','','0','0','0','','','','','','0',''],
+['HILDA REYES QUIROZ','0','0','0','0','','0','0','','','','','','0',''],
+['ARMANDO CARBAJAL','','','','','1','1','0','','','','','','2',''],
+['RUBEN JESUS PIÑA ','','','','','2','2','1','','','','','','5',''],
+['HECTOR EMPORO','2','2','2','2','2','2','2','2','','','','','16',''],
+['ALEJANDRO SANCHEZ VARGAS','','','','','0','0','0','','','','','','0',''],
+['ALEXIS SALVADOR GARCIA PEREZ','','','1','','1','2','0','1','','','','','5',''],
+['IVAN SANCHEZ MENDOZA','','','1','2','2','2','2','2','','','','','11',''],
+['AURORA LIZBETH MEDINA MARTINEZ','','','','','1','1','2','1','','','','','5','24'],
+['DULCE VIOLETA FLORES FIGUEROA','','','','','1','1','1','2','','','','','5',''],
+['RICARDO ROSALES','','','','','1','0','0','','','','','','1',''],
+['GUILLERMO PEÑA ADAME','','','','','0','0','0','','','','','','0',''],
+['JOVITA ','','','','','1','1','0','','','','','','2',''],
+['JOSELYN PICHARDO','','','','','0','0','0','','','','','','0',''],
+['ANTONIO HERNANDEZ','','','1','','1','2','1','1','','','','','6',''],
+['LUIS ENRIQUE MEDINA','','','','1','1','1','0','1','','','','','4',''],
+['JOSE MANUEL YAXI','','','1','','2','1','1','','','','','','5',''],
+['DAVID CASTILLO','','','','','2','2','2','','','','','','6','2'],
+['JUANA DANIELA JASSO HUERTA','','','','','1','1','1','1','','','','','4',''],
+['JOSE LUIS CRUZ','','','','1','0','0','0','','','','','','1',''],
+['GABRIELA CRUZ','','','','','0','0','0','','','','','','0',''],
+['JORGE VALDEZ','','','','','0','0','0','','','','','','0',''],
+['BRENDA MORENO GUTIERREZ','','','','','1','0','0','','','','','','1','26'],
+['FERNANDO BRITO','','','','','1','2','1','','','','','','4',''],
+['LUIS ANTONIO','','','','','1','2','2','2','','','','','7',''],
+['JESUS REYES DE JESUS','','','','','2','2','1','2','','','','','7','18'],
+['BECARIOS','','','','','','','','','','','','','0',''],
+['LUIS MIGUEL BECERRIL GARCIA ','','','','','2','1','1','','','','','','4',''],
+['VICTOR HUGO JUAREZ GUADARRAMA','','','','','2','2','2','','','','','','6',''],
+['ALISON HERNANDEZ HERNANDEZ','','','','','2','2','2','','','','','','6',''],
+['MARLON GONZALEZ CAMPOS','','','','','2','2','2','','','','','','6',''],
+['ALONDRA VAZQUEZ','','','2','','2','2','2','','','','','','8',''],
+['EXTERNOS','','','','','','','','','','','','','0',''],
+['SISTEMAS','','','2','','7','4','6','','','','','','19',''],
+['C.P VICTOR','','','','','0','1','','','','','','','1',''],
+['CONSULTORIA','','','','','0','','','','','','','','0',''],
+['ESCUELA','','','','','0','','','','','','','','0',''],
+];
+ 
+$(document).ready(function () {
+    $('#example').DataTable({
+        data: dataSet,
+        columns: [
+            { title: 'Nombre' },
+            { title: '09-may' },
+            { title: '10-may' },
+            { title: '11-may' },
+            { title: '12-may' },
+            { title: '15-may' },
+		    { title: '16-may' },
+			{ title: '17-may' },
+			{ title: '18-may' },
+			{ title: '19-may' },
+			{ title: '22-may' },
+			{ title: '23-may' },
+			{ title: '24-may' },
+			{ title: 'TOTAL' },		
+			{ title: 'COMPLEMENTOS' },
+        ],
+    });
+});
+
+
+
+function ExportToExcel(type, fn, dl) {
+       var elt = document.getElementById('example');
+       var wb = XLSX.utils.table_to_book(elt, { sheet: "sheet1" });
+       return dl ?
+         XLSX.write(wb, { bookType: type, bookSST: true, type: 'base64' }):
+         XLSX.writeFile(wb, fn || ('MySheetName.' + (type || 'xlsx')));
+    }
+
+
+</script>
+
+
+
+<!-- 09-may	10-may	11-may	12-may	15-may	16-may	17-may	18-may	19-may	22-may	23-may	24-may TOTAL COMPLEMENTOS -->
+

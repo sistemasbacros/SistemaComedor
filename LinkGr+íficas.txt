@@ -1,0 +1,72 @@
+Pendientes:
+
+ 1.- Exportar a excel.
+ 2.- Configurar IIS y PHP.
+ 
+ Verduras
+ Lácteos
+ Accesorios
+ 
+ ///////////////obtener valores select 
+ 
+ function myFunction() {
+  var x = document.getElementById("mySelect").value;
+  document.getElementById("demo").innerHTML = x;
+}
+
+
+Realizar pruebas habilitando IIS y PHP.
+
+
+Link librerias.
+https://echarts.apache.org/examples/en/index.html#chart-type-bar
+
+
+link instalación PHP  instalar php in iis
+https://www.vultr.com/docs/how-to-setup-php-manager-on-windows-with-iis/
+
+__________________________________  instalar php in iis
+https://www.it-christos.com/home/blog/implement-php-and-ms-sql-with-iis-web-server
+
+
+link instalar driver sql server
+https://learn.microsoft.com/es-es/iis/application-frameworks/install-and-configure-php-on-iis/install-the-sql-server-driver-for-php
+
+
+link php
+https://www.it-christos.com/home/blog/implement-php-and-ms-sql-with-iis-web-server
+
+
+Descargar extensiones sql server.
+https://learn.microsoft.com/en-us/sql/connect/php/download-drivers-php-sql-server?view=sql-server-ver16
+
+Server=localhost\SQLEXPRESS;Database=master;Trusted_Connection=True;
+
+
+Agrupar datos en tablero de nómina:
+Total por semana
+Total por mes 
+Total por día
+
+
+Consultas;
+Cuadrante1
+Datos generales por área.
+
+Cuadrante2 Ordenes
+Total comparativa por semana 
+Total comparativa por mes
+
+Cuadrante3 Dinero:
+Total de personal
+mensual
+
+Cocina:
+Visualizar totales del dia.
+Tablero ordenes de compra.
+
+
+NOMBRE	09-may	10-may	11-may	12-may	15-may	16-may	17-may	18-may	19-may	22-may	23-may	24-may	TOTAL	COMPLEMENTOS
+
+
+
