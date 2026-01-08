@@ -12,15 +12,21 @@ function detectarEntorno() {
     // Detectar si está en Docker
     $enDocker = file_exists('/.dockerenv');
     
-    // Si está en Docker y accede por localhost (puerto 80), es producción
-    if ($enDocker && (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false)) {
+    // Si está en Docker y accede por localhost o IP local, es producción (Docker)
+    if ($enDocker && (
+        strpos($host, 'localhost') !== false || 
+        strpos($host, '127.0.0.1') !== false ||
+        strpos($host, '192.168.') !== false ||
+        strpos($host, '10.') !== false
+    )) {
         return 'produccion';
     }
     
-    // Si contiene localhost o 127.0.0.1 y NO está en Docker, es entorno local
+    // Si contiene localhost o IPs locales y NO está en Docker, es entorno local
     if (strpos($host, 'localhost') !== false || 
         strpos($host, '127.0.0.1') !== false ||
-        strpos($host, '192.168.') !== false) {
+        strpos($host, '192.168.') !== false ||
+        strpos($host, '10.') !== false) {
         return 'local';
     }
     
@@ -37,10 +43,13 @@ function detectarEntorno() {
 
 // ========== DETECCIÓN DE SESSION PATH ==========
 function getSessionPath() {
-    // Si está accediendo directo por localhost (Docker o local), usar raíz
+    // Si está accediendo directo por localhost o IP local (Docker o local), usar raíz
     $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
     
-    if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+    if (strpos($host, 'localhost') !== false || 
+        strpos($host, '127.0.0.1') !== false ||
+        strpos($host, '192.168.') !== false ||
+        strpos($host, '10.') !== false) {
         return '/';
     }
     
