@@ -48,18 +48,18 @@ jobs:
         run: |
           if (Test-Path "$env:DEPLOY_PATH") {
             $backupPath = "$env:DEPLOY_PATH\..\ComedorProduccion_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-            Write-Host "[INFO] Creando backup en: $backupPath"
+            Write-Host '[INFO] Creando backup en:' $backupPath
             Copy-Item -Path "$env:DEPLOY_PATH" -Destination "$backupPath" -Recurse -Force
-            Write-Host "[OK] Backup creado exitosamente"
+            Write-Host '[OK] Backup creado exitosamente'
           } else {
-            Write-Host "[INFO] No hay deployment previo para hacer backup"
+            Write-Host '[INFO] No hay deployment previo para hacer backup'
           }
         shell: powershell
         continue-on-error: true
       
       - name: 🚀 Deploy files to production server
         run: |
-          Write-Host "[INFO] Desplegando archivos a PRODUCCIÓN..."
+          Write-Host '[INFO] Desplegando archivos a PRODUCCIÓN...'
           
           # Copiar todos los archivos excepto .env y logs
           $excludeItems = @('.env', 'nginx/logs', '.git', 'README.md')
@@ -86,19 +86,19 @@ jobs:
             }
           }
           
-          Write-Host "[OK] Archivos desplegados en $env:DEPLOY_PATH"
+          Write-Host '[OK] Archivos desplegados en' $env:DEPLOY_PATH
         shell: powershell
       
       - name: 🐳 Verify Docker installation
         run: |
           try {
             $dockerVersion = docker --version
-            Write-Host "[OK] Docker instalado: $dockerVersion"
+            Write-Host '[OK] Docker instalado: $dockerVersion"
             
             $composeVersion = docker compose version
-            Write-Host "[OK] Docker Compose instalado: $composeVersion"
+            Write-Host '[OK] Docker Compose instalado: $composeVersion"
           } catch {
-            Write-Host "[ERROR] Docker no está instalado o no está en el PATH"
+            Write-Host '[ERROR] Docker no está instalado o no está en el PATH"
             exit 1
           }
         shell: powershell
@@ -108,11 +108,11 @@ jobs:
           cd $env:DEPLOY_PATH
           
           if (Test-Path "$env:COMPOSE_FILE") {
-            Write-Host "[INFO] Deteniendo contenedores de PRODUCCIÓN..."
+            Write-Host '[INFO] Deteniendo contenedores de PRODUCCIÓN..."
             docker compose -f $env:COMPOSE_FILE down
-            Write-Host "[OK] Contenedores detenidos"
+            Write-Host '[OK] Contenedores detenidos"
           } else {
-            Write-Host "[INFO] No hay contenedores corriendo"
+            Write-Host '[INFO] No hay contenedores corriendo"
           }
         shell: powershell
         continue-on-error: true
@@ -121,13 +121,13 @@ jobs:
         run: |
           cd $env:DEPLOY_PATH
           
-          Write-Host "[INFO] Construyendo imágenes Docker para PRODUCCIÓN..."
+          Write-Host '[INFO] Construyendo imágenes Docker para PRODUCCIÓN..."
           docker compose -f $env:COMPOSE_FILE build --no-cache
           
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "[OK] Imágenes construidas exitosamente"
+            Write-Host '[OK] Imágenes construidas exitosamente"
           } else {
-            Write-Host "[ERROR] Error al construir imágenes"
+            Write-Host '[ERROR] Error al construir imágenes"
             exit 1
           }
         shell: powershell
@@ -136,13 +136,13 @@ jobs:
         run: |
           cd $env:DEPLOY_PATH
           
-          Write-Host "[INFO] Iniciando contenedores de PRODUCCIÓN..."
+          Write-Host '[INFO] Iniciando contenedores de PRODUCCIÓN..."
           docker compose -f $env:COMPOSE_FILE up -d
           
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "[OK] Contenedores iniciados exitosamente"
+            Write-Host '[OK] Contenedores iniciados exitosamente"
           } else {
-            Write-Host "[ERROR] Error al iniciar contenedores"
+            Write-Host '[ERROR] Error al iniciar contenedores"
             exit 1
           }
         shell: powershell
@@ -151,7 +151,7 @@ jobs:
         run: |
           cd $env:DEPLOY_PATH
           
-          Write-Host "[INFO] Verificando estado de contenedores..."
+          Write-Host '[INFO] Verificando estado de contenedores..."
           Start-Sleep -Seconds 10
           
           $containers = docker compose -f $env:COMPOSE_FILE ps --format json | ConvertFrom-Json
@@ -159,18 +159,18 @@ jobs:
           $allRunning = $true
           foreach ($container in $containers) {
             if ($container.State -ne "running") {
-              Write-Host "[ERROR] Contenedor $($container.Service) no está corriendo. Estado: $($container.State)"
+              Write-Host '[ERROR] Contenedor $($container.Service) no está corriendo. Estado: $($container.State)"
               $allRunning = $false
             } else {
-              Write-Host "[OK] Contenedor $($container.Service) corriendo correctamente"
+              Write-Host '[OK] Contenedor $($container.Service) corriendo correctamente"
             }
           }
           
           if (-not $allRunning) {
-            Write-Host "[ERROR] Algunos contenedores no están corriendo correctamente"
-            Write-Host "--- LOGS DE NGINX ---"
+            Write-Host '[ERROR] Algunos contenedores no están corriendo correctamente"
+            Write-Host '--- LOGS DE NGINX ---'
             docker compose -f $env:COMPOSE_FILE logs nginx
-            Write-Host "--- LOGS DE PHP ---"
+            Write-Host '--- LOGS DE PHP ---'
             docker compose -f $env:COMPOSE_FILE logs php
             exit 1
           }
@@ -178,7 +178,7 @@ jobs:
       
       - name: 🏥 Health check
         run: |
-          Write-Host "[INFO] Verificando salud del servidor de PRODUCCIÓN..."
+          Write-Host '[INFO] Verificando salud del servidor de PRODUCCIÓN..."
           $maxAttempts = 30
           $attempt = 0
           $healthy = $false
@@ -199,24 +199,24 @@ jobs:
               $response = Invoke-WebRequest -Uri "http://localhost:$port" -UseBasicParsing -TimeoutSec 5
               
               if ($response.StatusCode -eq 200) {
-                Write-Host "[OK] Servidor de PRODUCCIÓN respondiendo correctamente: $($response.StatusCode)"
+                Write-Host '[OK] Servidor de PRODUCCIÓN respondiendo correctamente: $($response.StatusCode)"
                 $healthy = $true
                 break
               }
             } catch {
               $attempt++
-              Write-Host "[WAITING] Intento $attempt/$maxAttempts - Esperando respuesta del servidor..."
+              Write-Host '[WAITING] Intento $attempt/$maxAttempts - Esperando respuesta del servidor..."
             }
           }
           
           if (-not $healthy) {
-            Write-Host "[ERROR] Servidor no responde después de $maxAttempts intentos"
-            Write-Host "[WARNING] Revisar logs de contenedores"
+            Write-Host '[ERROR] Servidor no responde después de $maxAttempts intentos"
+            Write-Host '[WARNING] Revisar logs de contenedores"
             
             cd $env:DEPLOY_PATH
-            Write-Host "--- LOGS DE NGINX ---"
+            Write-Host '--- LOGS DE NGINX ---'
             docker compose -f $env:COMPOSE_FILE logs --tail=50 nginx
-            Write-Host "--- LOGS DE PHP ---"
+            Write-Host '--- LOGS DE PHP ---'
             docker compose -f $env:COMPOSE_FILE logs --tail=50 php
             
             exit 1
@@ -225,9 +225,9 @@ jobs:
       
       - name: 🧹 Clean old images
         run: |
-          Write-Host "[INFO] Limpiando imágenes antiguas..."
+          Write-Host '[INFO] Limpiando imágenes antiguas..."
           docker image prune -f
-          Write-Host "[OK] Imágenes antiguas eliminadas"
+          Write-Host '[OK] Imágenes antiguas eliminadas"
         shell: powershell
         continue-on-error: true
       
@@ -245,48 +245,48 @@ jobs:
             }
           }
           
-          Write-Host ""
+          Write-Host ''
           Write-Host "============================================================="
           Write-Host "  DESPLIEGUE EN PRODUCCIÓN COMPLETADO EXITOSAMENTE"
           Write-Host "============================================================="
-          Write-Host ""
+          Write-Host ''
           Write-Host "Ubicación: $env:DEPLOY_PATH"
           Write-Host "URL: http://localhost:$port"
           Write-Host "Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Host "Commit: $env:GITHUB_SHA"
           Write-Host "Autor: $env:GITHUB_ACTOR"
           Write-Host "Branch: main (PRODUCCIÓN)"
-          Write-Host ""
+          Write-Host ''
           Write-Host "Contenedores corriendo:"
           docker compose -f $env:COMPOSE_FILE ps
-          Write-Host ""
-          Write-Host "[OK] Servidor de PRODUCCIÓN actualizado y corriendo"
-          Write-Host ""
+          Write-Host ''
+          Write-Host '[OK] Servidor de PRODUCCIÓN actualizado y corriendo"
+          Write-Host ''
         shell: powershell
       
       - name: 📧 Notify on failure
         if: failure()
         run: |
-          Write-Host ""
+          Write-Host ''
           Write-Host "============================================================="
           Write-Host "       DESPLIEGUE EN PRODUCCIÓN FALLÓ"
           Write-Host "============================================================="
-          Write-Host ""
-          Write-Host "[INFO] Revisa los logs del workflow en GitHub Actions"
-          Write-Host "[INFO] Revisa los logs de contenedores con:"
+          Write-Host ''
+          Write-Host '[INFO] Revisa los logs del workflow en GitHub Actions"
+          Write-Host '[INFO] Revisa los logs de contenedores con:"
           Write-Host "       cd $env:DEPLOY_PATH"
           Write-Host "       docker compose -f $env:COMPOSE_FILE logs"
-          Write-Host ""
-          Write-Host "[INFO] Restaurar desde backup si es necesario"
-          Write-Host ""
+          Write-Host ''
+          Write-Host '[INFO] Restaurar desde backup si es necesario"
+          Write-Host ''
           
           # Intentar restaurar desde el último backup
           $backupFolders = Get-ChildItem -Path "$env:DEPLOY_PATH\.." -Directory -Filter "ComedorProduccion_backup_*" | Sort-Object Name -Descending
           
           if ($backupFolders.Count -gt 0) {
             $latestBackup = $backupFolders[0].FullName
-            Write-Host "[INFO] Último backup disponible: $latestBackup"
-            Write-Host "[INFO] Para restaurar ejecuta:"
+            Write-Host '[INFO] Último backup disponible: $latestBackup"
+            Write-Host '[INFO] Para restaurar ejecuta:"
             Write-Host "       Remove-Item -Path '$env:DEPLOY_PATH' -Recurse -Force"
             Write-Host "       Copy-Item -Path '$latestBackup' -Destination '$env:DEPLOY_PATH' -Recurse"
             Write-Host "       cd $env:DEPLOY_PATH"
