@@ -1,4 +1,4 @@
-name: Deploy to Test Server
+﻿name: Deploy to Test Server
 
 on:
   push:
@@ -235,7 +235,7 @@ jobs:
           Write-Host "     DESPLIEGUE EN TEST COMPLETADO EXITOSAMENTE"
           Write-Host "============================================================="
           Write-Host ''
-          Write-Host "Ubicación: $env:DEPLOY_PATH"
+          Write-Host "Ubicacion: $env:DEPLOY_PATH"
           Write-Host "URL: http://localhost:$port"
           Write-Host "Fecha: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
           Write-Host "Commit: $env:GITHUB_SHA"
