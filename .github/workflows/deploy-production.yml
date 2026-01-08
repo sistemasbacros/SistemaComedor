@@ -40,20 +40,7 @@ jobs:
           Write-Host "OK: Archivo .env encontrado"
         shell: powershell
       
-      - name: 💾 Backup current deployment
-        run: |
-          if (Test-Path "$env:DEPLOY_PATH") {
-            $backupPath = "$env:DEPLOY_PATH\..\ComedorProduccion_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-            Write-Host "INFO: Creando backup en:" $backupPath
-            Copy-Item -Path "$env:DEPLOY_PATH" -Destination "$backupPath" -Recurse -Force
-            Write-Host "OK: Backup creado exitosamente"
-          } else {
-            Write-Host "INFO: No hay deployment previo para hacer backup"
-          }
-        shell: powershell
-        continue-on-error: true
-      
-      - name: 🚀 Deploy files to production server
+      - name:  Deploy files to production server
         run: |
           Write-Host "INFO: Desplegando archivos a PRODUCCION..."
           
@@ -117,13 +104,13 @@ jobs:
         run: |
           cd $env:DEPLOY_PATH
           
-          Write-Host "INFO: Construyendo imágenes Docker para PRODUCCION..."
-          docker compose -f $env:COMPOSE_FILE build --no-cache
+          Write-Host "INFO: Construyendo imagenes Docker para PRODUCCION..."
+          docker compose -f $env:COMPOSE_FILE build
           
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "OK: Imágenes construidas exitosamente"
+            Write-Host "OK: Imagenes construidas exitosamente"
           } else {
-            Write-Host "ERROR: Error al construir imágenes"
+            Write-Host "ERROR: Error al construir imagenes"
             exit 1
           }
         shell: powershell
@@ -221,9 +208,9 @@ jobs:
       
       - name: 🧹 Clean old images
         run: |
-          Write-Host "INFO: Limpiando imágenes antiguas..."
+          Write-Host "INFO: Limpiando imagenes antiguas..."
           docker image prune -f
-          Write-Host "OK: Imágenes antiguas eliminadas"
+          Write-Host "OK: imagenes antiguas eliminadas"
         shell: powershell
         continue-on-error: true
       
@@ -265,7 +252,7 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "============================================================="
-          Write-Host "       DESPLIEGUE EN PRODUCCION FALLÓ"
+          Write-Host "       DESPLIEGUE EN PRODUCCION FALLO"
           Write-Host "============================================================="
           Write-Host ""
           Write-Host "INFO: Revisa los logs del workflow en GitHub Actions"
@@ -273,19 +260,4 @@ jobs:
           Write-Host "       cd $env:DEPLOY_PATH"
           Write-Host "       docker compose -f $env:COMPOSE_FILE logs"
           Write-Host ""
-          Write-Host "INFO: Restaurar desde backup si es necesario"
-          Write-Host ""
-          
-          # Intentar restaurar desde el último backup
-          $backupFolders = Get-ChildItem -Path "$env:DEPLOY_PATH\.." -Directory -Filter "ComedorProduccion_backup_*" | Sort-Object Name -Descending
-          
-          if ($backupFolders.Count -gt 0) {
-            $latestBackup = $backupFolders[0].FullName
-            Write-Host "INFO: Último backup disponible: $latestBackup"
-            Write-Host "INFO: Para restaurar ejecuta:"
-            Write-Host "       Remove-Item -Path '$env:DEPLOY_PATH' -Recurse -Force"
-            Write-Host "       Copy-Item -Path '$latestBackup' -Destination '$env:DEPLOY_PATH' -Recurse"
-            Write-Host "       cd $env:DEPLOY_PATH"
-            Write-Host "       docker compose -f $env:COMPOSE_FILE up -d"
-          }
         shell: powershell
