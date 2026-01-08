@@ -93,10 +93,18 @@ $API_CONFIG = [
 // Si necesitas forzar un entorno específico, descomenta y establece el valor:
 // $entorno = 'local'; // Opciones: 'local', 'desarrollo', 'produccion'
 
+// ========== DETECCIÓN DINÁMICA DE APP_URL ==========
+// Construir la URL de la aplicación basada en cómo accede el usuario
+function getAppBaseUrl() {
+    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    return $protocol . '://' . $host;
+}
+
 // ========== CONSTANTES GLOBALES ==========
 define('API_ENTORNO', $entorno);
 define('API_BASE_URL', $API_CONFIG[$entorno]['base_url']);
-define('APP_BASE_URL', $API_CONFIG[$entorno]['app_url']);
+define('APP_BASE_URL', getAppBaseUrl());  // Usar URL dinámica basada en el request
 define('API_TIMEOUT', $API_CONFIG[$entorno]['timeout']);
 define('API_CONNECT_TIMEOUT', $API_CONFIG[$entorno]['connect_timeout']);
 define('API_DEBUG', $API_CONFIG[$entorno]['debug']);
