@@ -90,7 +90,8 @@ jobs:
         run: |
           cd $env:DEPLOY_PATH
           
-          if (Test-Path "$env:COMPOSE_FILE") {
+          $composeFile = Join-Path $env:DEPLOY_PATH $env:COMPOSE_FILE
+          if (Test-Path $composeFile) {
             Write-Host "INFO: Deteniendo contenedores de PRODUCCION..."
             docker compose -f $env:COMPOSE_FILE down
             Write-Host "OK: Contenedores detenidos"
