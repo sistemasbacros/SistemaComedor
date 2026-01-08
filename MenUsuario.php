@@ -7,7 +7,7 @@ require_once __DIR__ . '/config_api.php';
 // ==================================================
 
 // Configuración de sesión (path dinámico según entorno)
-$sessionPath = detectarEntorno() === 'local' ? '/' : '/Comedor/';
+$sessionPath = getSessionPath();
 session_set_cookie_params([
     'lifetime' => 0, // Cookie de sesión - se elimina al cerrar pestaña o recargar
     'path' => $sessionPath,

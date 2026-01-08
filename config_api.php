@@ -35,6 +35,23 @@ function detectarEntorno() {
     return 'produccion';
 }
 
+// ========== DETECCIÓN DE SESSION PATH ==========
+function getSessionPath() {
+    // Si está accediendo directo por localhost (Docker o local), usar raíz
+    $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
+    
+    if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+        return '/';
+    }
+    
+    // Para dominios con subdirectorio
+    if (strpos($host, 'bacros') !== false) {
+        return '/Comedor/';
+    }
+    
+    return '/';
+}
+
 // ========== CONFIGURACIÓN POR ENTORNO ==========
 $entorno = detectarEntorno();
 
