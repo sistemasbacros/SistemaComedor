@@ -25,20 +25,20 @@ jobs:
         run: |
           if (-not (Test-Path "$env:DEPLOY_PATH")) {
             New-Item -Path "$env:DEPLOY_PATH" -ItemType Directory -Force
-            Write-Host "[OK] Directorio de despliegue creado"
+            Write-Host '[OK] Directorio de despliegue creado'
           }
         shell: powershell
       
       - name: 📋 Copy .env if not exists
         run: |
           if (-not (Test-Path "$env:DEPLOY_PATH\.env")) {
-            if (Test-Path ".env.example") {
-              Copy-Item -Path ".env.example" -Destination "$env:DEPLOY_PATH\.env" -Force
-              Write-Host "[WARNING] Archivo .env creado desde template"
-              Write-Host "[WARNING] IMPORTANTE: Configurar manualmente con credenciales de TEST"
+            if (Test-Path '.env.example') {
+              Copy-Item -Path '.env.example' -Destination "$env:DEPLOY_PATH\.env" -Force
+              Write-Host '[WARNING] Archivo .env creado desde template'
+              Write-Host '[WARNING] IMPORTANTE: Configurar manualmente con credenciales de TEST'
             }
           } else {
-            Write-Host "[INFO] Archivo .env ya existe"
+            Write-Host '[INFO] Archivo .env ya existe'
           }
         shell: powershell
       
