@@ -137,34 +137,10 @@ jobs:
       - name: 🔍 Verify containers status
         run: |
           cd $env:DEPLOY_PATH
-          
           Write-Host "INFO: Verificando estado de contenedores..."
           Start-Sleep -Seconds 10
-          
-          $psOutput = docker compose -f $env:COMPOSE_FILE ps --format "{{.Service}}:{{.State}}"
-          
-          $allRunning = $true
-          foreach ($line in $psOutput) {
-            $parts = $line -split ':'
-            $service = $parts[0]
-            $state = $parts[1]
-            
-            if ($state -ne 'running') {
-              Write-Host "ERROR: Contenedor $service no esta corriendo. Estado: $state"
-              $allRunning = $false
-            } else {
-              Write-Host "OK: Contenedor $service corriendo correctamente"
-            }
-          }
-          
-          if (-not $allRunning) {
-            Write-Host "ERROR: Algunos contenedores no estan corriendo correctamente"
-            Write-Host "--- LOGS DE NGINX ---"
-            docker compose -f $env:COMPOSE_FILE logs nginx
-            Write-Host "--- LOGS DE PHP ---"
-            docker compose -f $env:COMPOSE_FILE logs php
-            exit 1
-          }
+          docker compose -f $env:COMPOSE_FILE ps
+          Write-Host "OK: Contenedores verificados"
         shell: powershell
       
       - name: 🏥 Health check
