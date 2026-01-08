@@ -106,12 +106,20 @@ jobs:
           cd $env:DEPLOY_PATH
           
           Write-Host "INFO: Construyendo imagenes Docker para PRODUCCION..."
-          docker compose -f $env:COMPOSE_FILE build
+          Write-Host "DEBUG: Directorio actual: $(Get-Location)"
+          Write-Host "DEBUG: Archivo compose: $env:COMPOSE_FILE"
           
-          if ($LASTEXITCODE -eq 0) {
+          docker compose -f $env:COMPOSE_FILE build 2>&1 | Tee-Object -Variable buildOutput
+          $buildExitCode = $LASTEXITCODE
+          
+          Write-Host "DEBUG: Exit code: $buildExitCode"
+          
+          if ($buildExitCode -eq 0) {
             Write-Host "OK: Imagenes construidas exitosamente"
           } else {
             Write-Host "ERROR: Error al construir imagenes"
+            Write-Host "ERROR: Output completo:"
+            Write-Host $buildOutput
             exit 1
           }
         shell: powershell
