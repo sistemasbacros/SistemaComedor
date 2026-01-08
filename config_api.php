@@ -33,7 +33,7 @@ $entorno = detectarEntorno();
 // URLs base de la API según el entorno
 $API_CONFIG = [
     'local' => [
-        'base_url' => 'http://localhost:3000',   // API Backend (Node.js puerto 3000)
+        'base_url' => 'http://host.docker.internal:3000',   // API Backend (Node.js puerto 3000) - Desde Docker
         'app_url' => 'http://localhost:8000',    // Frontend PHP (puerto 8000)
         'timeout' => 10,
         'connect_timeout' => 5,
