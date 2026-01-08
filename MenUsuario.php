@@ -1,16 +1,20 @@
 <?php
+// Cargar configuración global de la API
+require_once __DIR__ . '/config_api.php';
+
 // ==================================================
 // PROTECCIÓN DE SEGURIDAD MEJORADA - NO ELIMINAR
 // ==================================================
 
-// Configuración de sesión
+// Configuración de sesión (path dinámico según entorno)
+$sessionPath = detectarEntorno() === 'local' ? '/' : '/Comedor/';
 session_set_cookie_params([
-    'lifetime' => 0,
-    'path' => '/Comedor/',
+    'lifetime' => 0, // Cookie de sesión - se elimina al cerrar pestaña o recargar
+    'path' => $sessionPath,
     'domain' => '',
     'secure' => false,
     'httponly' => true,
-    'samesite' => 'Strict'
+    'samesite' => 'Lax' // Cambiado de Strict a Lax para mejor compatibilidad
 ]);
 
 // Configuración de seguridad
@@ -35,20 +39,20 @@ if (!$isAuthenticated) {
     // Destruir completamente la sesión
     session_unset();
     session_destroy();
-    setcookie(session_name(), '', time()-3600, '/');
+    setcookie(session_name(), '', time()-3600, $sessionPath);
     
     // Redirigir al login
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: " . getAppUrl('Admiin.php'));
     exit;
 }
 
-// Verificar expiración de sesión (2 minutos - muy corto)
-$sessionTimeout = 2 * 60; // 2 minutos
+// Verificar expiración de sesión (5 minutos por seguridad)
+$sessionTimeout = 5 * 60; // 5 minutos
 if (isset($_SESSION['LOGIN_TIME']) && (time() - $_SESSION['LOGIN_TIME'] > $sessionTimeout)) {
     session_unset();
     session_destroy();
-    setcookie(session_name(), '', time()-3600, '/');
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    setcookie(session_name(), '', time()-3600, $sessionPath);
+    header("Location: " . getAppUrl('Admiin.php'));
     exit;
 }
 
@@ -695,9 +699,8 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
         </div>
         
         <ul class="nav flex-column px-3">
-            <!-- MÓDULO DE MENÚ ELIMINADO -->
             <li class="nav-item">
-                <a class="nav-link <?php echo $PEDIDOS_BLOQUEADOS ? 'disabled' : ''; ?>" href="#" data-section="pedidos" id="pedidos-link">
+                <a class="nav-link <?php echo $PEDIDOS_BLOQUEADOS ? 'disabled' : ''; ?>" href="#" data-section="pedidos">
                     <i class="fas fa-clipboard-list"></i> Pedidos
                     <?php if ($PEDIDOS_BLOQUEADOS): ?>
                         <span class="lock-badge">
@@ -722,7 +725,7 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                 </a>
             </li>
             <li class="nav-item mt-auto">
-                <a class="nav-link text-danger" href="http://desarollo-bacros/Comedor/admicome4.php?logout=true" id="logoutBtn">
+                <a class="nav-link text-danger" href="<?php echo getAppUrl('admicome4.php?logout=true'); ?>" id="logoutBtn">
                     <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
                 </a>
             </li>
@@ -754,7 +757,7 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
             </div>
         </div>
 
-        <!-- Sección de Pedidos (ahora será la primera que se muestre) -->
+        <!-- Sección de Pedidos -->
         <div id="pedidos" class="section active">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center <?php echo $PEDIDOS_BLOQUEADOS ? 'blocked' : ''; ?>">
@@ -771,12 +774,6 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                     </div>
                 </div>
                 <div class="card-body p-0 position-relative">
-                    <!-- Indicador de carga para Pedidos -->
-                    <div id="pedidos-loading" class="loading-overlay">
-                        <div class="loading-spinner"></div>
-                        <div class="loading-text">Cargando sistema de pedidos...</div>
-                    </div>
-                    
                     <?php if ($PEDIDOS_BLOQUEADOS): ?>
                         <!-- Overlay de bloqueo -->
                         <div class="blocked-overlay">
@@ -799,10 +796,13 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                     <?php else: ?>
                         <!-- Contenedor del iframe (solo si no está bloqueado) -->
                         <div class="report-iframe-container">
-                            <iframe src="http://desarollo-bacros/Comedor/Menpedidos1.php" 
+                            <div id="pedidos-loading" class="loading-overlay">
+                                <div class="loading-spinner"></div>
+                                <div class="loading-text">Cargando sistema de pedidos...</div>
+                            </div>
+                            <iframe src="<?php echo getAppUrl('Menpedidos1.php'); ?>" 
                                     class="report-iframe" 
-                                    id="pedidos-iframe"
-                                    onload="hideLoading('pedidos-loading')">
+                                    id="pedidos-iframe">
                             </iframe>
                         </div>
                     <?php endif; ?>
@@ -824,15 +824,12 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                     </div>
                 </div>
                 <div class="card-body p-0 position-relative">
-                    <!-- Indicador de carga para Consulta -->
-                    <div id="consulta-loading" class="loading-overlay">
-                        <div class="loading-spinner"></div>
-                        <div class="loading-text">Cargando sistema de consulta...</div>
-                    </div>
-                    
-                    <!-- Contenedor del iframe -->
                     <div class="report-iframe-container">
-                        <iframe src="http://desarollo-bacros/Comedor/AgendaPedidos1.php" 
+                        <div id="consulta-loading" class="loading-overlay">
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">Cargando sistema de consulta...</div>
+                        </div>
+                        <iframe src="<?php echo getAppUrl('AgendaPedidos1.php'); ?>" 
                                 class="report-iframe" 
                                 id="consulta-iframe"
                                 onload="hideLoading('consulta-loading')">
@@ -856,15 +853,12 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                     </div>
                 </div>
                 <div class="card-body p-0 position-relative">
-                    <!-- Indicador de carga para Reporte -->
-                    <div id="reporte-loading" class="loading-overlay">
-                        <div class="loading-spinner"></div>
-                        <div class="loading-text">Cargando sistema de reportes...</div>
-                    </div>
-                    
-                    <!-- Contenedor del iframe -->
                     <div class="report-iframe-container">
-                        <iframe src="http://desarollo-bacros/Comedor/descUsuario.php" 
+                        <div id="reporte-loading" class="loading-overlay">
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">Cargando sistema de reportes...</div>
+                        </div>
+                        <iframe src="<?php echo getAppUrl('descUsuario.php'); ?>" 
                                 class="report-iframe" 
                                 id="reporte-iframe"
                                 onload="hideLoading('reporte-loading')">
@@ -888,15 +882,12 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                     </div>
                 </div>
                 <div class="card-body p-0 position-relative">
-                    <!-- Indicador de carga para QR -->
-                    <div id="qr-loading" class="loading-overlay">
-                        <div class="loading-spinner"></div>
-                        <div class="loading-text">Cargando generador de QR...</div>
-                    </div>
-                    
-                    <!-- Contenedor del iframe con fallback mejorado -->
                     <div class="report-iframe-container">
-                        <iframe src="http://desarollo-bacros/Comedor/GenerarQR1.php" 
+                        <div id="qr-loading" class="loading-overlay">
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">Cargando generador de QR...</div>
+                        </div>
+                        <iframe src="<?php echo getAppUrl('GenerarQR1.php'); ?>" 
                                 class="report-iframe" 
                                 id="qr-iframe"
                                 onload="hideLoading('qr-loading')">
@@ -905,6 +896,8 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                 </div>
             </div>
         </div>
+
+
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -918,60 +911,6 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
             if (loadingElement) {
                 loadingElement.style.display = 'none';
             }
-        }
-        
-        function showError(loadingId, message) {
-            const loadingElement = document.getElementById(loadingId);
-            if (loadingElement) {
-                loadingElement.innerHTML = `
-                    <div class="error-message">
-                        <div class="error-icon">
-                            <i class="fas fa-exclamation-triangle"></i>
-                        </div>
-                        <h3 class="error-title">Error de Carga</h3>
-                        <p class="error-description">${message}</p>
-                        <div class="error-actions">
-                            <button class="btn btn-primary" onclick="retryLoad('${loadingId}')">
-                                <i class="fas fa-redo me-2"></i>Reintentar
-                            </button>
-                            <button class="btn btn-outline-secondary" onclick="goToPedidos()">
-                                <i class="fas fa-clipboard-list me-2"></i>Volver a Pedidos
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }
-        }
-        
-        function retryLoad(loadingId) {
-            const sectionId = loadingId.replace('-loading', '');
-            const iframe = document.getElementById(sectionId + '-iframe');
-            const loading = document.getElementById(loadingId);
-            
-            if (iframe && loading) {
-                // Restaurar loading spinner
-                loading.innerHTML = `
-                    <div class="loading-spinner"></div>
-                    <div class="loading-text">Cargando...</div>
-                `;
-                loading.style.display = 'flex';
-                
-                // Recargar iframe
-                iframe.src = iframe.src;
-            }
-        }
-        
-        function goToPedidos() {
-            // Navegar a la sección de pedidos
-            document.querySelectorAll('.nav-link').forEach(function(l) {
-                l.classList.remove('active');
-            });
-            document.querySelectorAll('.section').forEach(function(s) {
-                s.classList.remove('active');
-            });
-            
-            document.querySelector('[data-section="pedidos"]').classList.add('active');
-            document.getElementById('pedidos').classList.add('active');
         }
         
         // Navigation functionality
@@ -1012,7 +951,7 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                     if (loadingElement) {
                         loadingElement.style.display = 'flex';
                         
-                        // Ocultar loading después de 3 segundos máximo (más rápido)
+                        // Ocultar loading después de 3 segundos máximo
                         setTimeout(function() {
                             if (loadingElement.style.display === 'flex') {
                                 hideLoading(sectionId + '-loading');
@@ -1022,6 +961,7 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                 });
             });
         }
+
 
         // Toggle sidebar functionality
         document.getElementById('toggleSidebar').addEventListener('click', function() {
@@ -1101,18 +1041,64 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
 
         // Simular carga inicial (más rápido)
         window.addEventListener('load', function() {
+            // Timeout de seguridad: ocultar loading después de 5 segundos máximo
             setTimeout(function() {
                 const pedidosLoading = document.getElementById('pedidos-loading');
-                if (pedidosLoading && pedidosLoading.style.display === 'flex') {
+                if (pedidosLoading && pedidosLoading.style.display !== 'none') {
+                    console.warn('Loading timeout - ocultando indicador de carga');
                     hideLoading('pedidos-loading');
+                    
+                    // Verificar si el iframe tiene contenido
+                    const iframe = document.getElementById('pedidos-iframe');
+                    if (iframe) {
+                        try {
+                            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                            if (!iframeDoc.body || iframeDoc.body.innerHTML.trim() === '') {
+                                console.error('El iframe está vacío o no cargó correctamente');
+                            }
+                        } catch (e) {
+                            console.log('No se puede acceder al contenido del iframe (normal si está en otro dominio)');
+                        }
+                    }
                 }
-            }, 500);
+            }, 5000);
+            
+            // Manejar el evento de carga del iframe
+            const pedidosIframe = document.getElementById('pedidos-iframe');
+            if (pedidosIframe) {
+                pedidosIframe.addEventListener('load', function() {
+                    console.log('Iframe de pedidos cargado exitosamente');
+                    hideLoading('pedidos-loading');
+                });
+                
+                pedidosIframe.addEventListener('error', function() {
+                    console.error('Error al cargar iframe de pedidos');
+                    hideLoading('pedidos-loading');
+                });
+            }
         });
 
+        // Detectar F5 o recarga manual y cerrar sesión
+        window.addEventListener('beforeunload', function(event) {
+            // Eliminar token JWT y cerrar sesión
+            sessionStorage.clear();
+            localStorage.clear();
+        });
+        
+        // Detectar tecla F5 específicamente
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'F5' || (event.ctrlKey && event.key === 'r')) {
+                event.preventDefault();
+                // Redirigir al logout
+                window.location.href = '<?php echo getAppUrl("admicome4.php?logout=true"); ?>';
+            }
+        });
+        
         // Prevenir acceso desde cache
         window.addEventListener('pageshow', function(event) {
             if (event.persisted) {
-                window.location.reload();
+                // Si viene del cache, destruir sesión y redirigir a login
+                window.location.href = '<?php echo getAppUrl("admicome4.php?logout=true"); ?>';
             }
         });
 

@@ -1,6 +1,6 @@
 <?php
 // ==================================================
-// CONFIGURACIÓN Y CONEXIÓN A BD
+// CONFIGURACIÓN Y AUTENTICACIÓN
 // ==================================================
 
 session_set_cookie_params([
@@ -13,6 +13,30 @@ session_set_cookie_params([
 ]);
 
 session_start();
+
+// Cargar configuración de la API y cliente
+require_once __DIR__ . '/config_api.php';
+require_once __DIR__ . '/api_client.php';
+
+// ==================================================
+// AUTENTICACIÓN FLEXIBLE (JWT O SESIÓN TRADICIONAL)
+// ==================================================
+
+// Detectar si viene desde iframe de MenUsuario.php (tiene sesión tradicional)
+$autenticado_sesion = (
+    isset($_SESSION['authenticated_from_login']) && 
+    $_SESSION['authenticated_from_login'] === true
+);
+
+// Detectar si tiene JWT token
+$autenticado_jwt = getAPIClient()->isAuthenticated();
+
+// Permitir acceso si tiene cualquiera de las dos autenticaciones
+if (!$autenticado_sesion && !$autenticado_jwt) {
+    // No tiene ninguna autenticación válida, redirigir a login
+    header('Location: Login2.php');
+    exit;
+}
 
 // ==================================================
 // FUNCIÓN PARA OBTENER TODOS LOS LUNES DEL MES
@@ -76,53 +100,57 @@ $semanasEnero2026 = [
 $todasSemanas = $semanasEnero2026;
 
 // ==================================================
-// OBTENER PARÁMETROS DEL USUARIO Y DATOS DE BD
+// OBTENER PERFIL DEL USUARIO
 // ==================================================
-
-// Obtener parámetros del usuario
-$user_name = $_GET['user_name'] ?? $_SESSION['user_name'] ?? '';
-$user_area = $_GET['user_area'] ?? $_SESSION['user_area'] ?? '';
-
-if (!empty($user_name)) {
-    $user_name = urldecode($user_name);
-    $user_area = urldecode($user_area);
-    $_SESSION['user_name'] = $user_name;
-    $_SESSION['user_area'] = $user_area;
-}
-
-// Conectar a la base de datos
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionInfo = [
-    "Database" => "Comedor",
-    "UID" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true,
-    "LoginTimeout" => 5
-];
-
-$conn = sqlsrv_connect($serverName, $connectionInfo);
 
 // Variables para los datos del usuario
 $id_empleado = '';
+$user_name = '';
+$user_area = '';
 $usuario_bd = '';
 $contrasena_bd = '';
 
-// Ejecutar query para obtener datos del usuario
-if ($conn && !empty($user_name)) {
-    $sql = "SELECT Id_Empleado, nombre, area, usuario, Contrasena FROM ConPed WHERE nombre LIKE ?";
-    $params = ["%$user_name%"];
-    $stmt = sqlsrv_query($conn, $sql, $params);
+// Intentar obtener desde JWT primero
+if ($autenticado_jwt) {
+    $perfil = obtenerPerfilUsuario();
     
-    if ($stmt && sqlsrv_has_rows($stmt)) {
-        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
-        $id_empleado = $row['Id_Empleado'] ?? '';
-        $usuario_bd = $row['usuario'] ?? '';
-        $contrasena_bd = $row['Contrasena'] ?? '';
+    if ($perfil) {
+        $id_empleado = $perfil['id_empleado'] ?? '';
+        $user_name = $perfil['nombre'] ?? '';
+        $user_area = $perfil['area'] ?? '';
+        $usuario_bd = $perfil['usuario'] ?? '';
     }
-    
-    if ($stmt) sqlsrv_free_stmt($stmt);
 }
+
+// Si no hay datos desde JWT, usar la sesión tradicional
+if (empty($user_name) && $autenticado_sesion) {
+    $user_name = $_SESSION['user_name'] ?? '';
+    $user_area = $_SESSION['user_area'] ?? '';
+    $id_empleado = $_SESSION['user_id'] ?? ''; // Cambiado de id_empleado a user_id
+    $usuario_bd = $_SESSION['user_username'] ?? ''; // Cambiado de usuario a user_username
+}
+
+// Si aún no hay datos del usuario, es un error
+if (empty($user_name)) {
+    // Mostrar información de debug
+    $debug_info = "Debug Info:<br>";
+    $debug_info .= "- Autenticado sesión: " . ($autenticado_sesion ? 'Sí' : 'No') . "<br>";
+    $debug_info .= "- Autenticado JWT: " . ($autenticado_jwt ? 'Sí' : 'No') . "<br>";
+    $debug_info .= "- user_name en sesión: " . (isset($_SESSION['user_name']) ? $_SESSION['user_name'] : 'No existe') . "<br>";
+    $debug_info .= "- user_id en sesión: " . (isset($_SESSION['user_id']) ? $_SESSION['user_id'] : 'No existe') . "<br>";
+    $debug_info .= "- authenticated_from_login: " . (isset($_SESSION['authenticated_from_login']) ? 'true' : 'false') . "<br>";
+    
+    die('<div style="background:#fff; padding:20px; margin:20px; border-left:4px solid #ef4444; color:#333;">' .
+        '<h3 style="color:#ef4444;">Error: No se pudieron obtener los datos del usuario</h3>' .
+        '<p>Por favor, cierra esta ventana y vuelve a iniciar sesión.</p>' .
+        '<hr>' . $debug_info . '</div>');
+}
+
+// Guardar en sesión para uso posterior
+$_SESSION['user_name'] = $user_name;
+$_SESSION['user_area'] = $user_area;
+$_SESSION['id_empleado'] = $id_empleado;
+$_SESSION['usuario'] = $usuario_bd;
 
 // ==================================================
 // PROCESAMIENTO DEL FORMULARIO
@@ -150,61 +178,99 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $juevesc = test_input($_POST["gender8"] ?? '');
     $viernesd = test_input($_POST["gender9"] ?? '');
     $viernesc = test_input($_POST["gender10"] ?? '');
-    $numemp = test_input($_POST["Nempleado"] ?? '');
-    $usua = test_input($_POST["Usuar"] ?? '');
-    $cont = test_input($_POST["contrase"] ?? '');
     $fecha = test_input($_POST["Fecha2"] ?? '');
 
     // Validaciones básicas
-    if (empty($numemp) || empty($usua) || empty($cont) || empty($fecha)) {
-        $notification = ['type' => 'error', 'message' => 'Todos los campos son obligatorios.'];
-    } elseif (!$conn) {
-        $notification = ['type' => 'error', 'message' => 'Error de conexión con la base de datos.'];
+    if (empty($fecha)) {
+        $notification = ['type' => 'error', 'message' => 'Debe seleccionar una semana.'];
     } else {
-        // Verificar credenciales
-        $sql2 = "SELECT Usuario, Contrasena FROM ConPed WHERE Usuario = ? AND Contrasena = ?";
-        $stmt2 = sqlsrv_query($conn, $sql2, [$usua, $cont]);
-        $credencial_valida = ($stmt2 && sqlsrv_has_rows($stmt2));
-
-        // Verificar pedidos existentes
-        $sql3 = "SELECT COUNT(*) AS Total FROM PedidosComida WHERE Fecha = ? AND Usuario = ?";
-        $stmt3 = sqlsrv_query($conn, $sql3, [$fecha, $usua]);
-        $row = $stmt3 ? sqlsrv_fetch_array($stmt3, SQLSRV_FETCH_ASSOC) : null;
-        $valor1 = $row['Total'] ?? 0;
-
-        if (!$credencial_valida) {
-            $notification = ['type' => 'error', 'message' => 'Usuario o contraseña incorrectos.'];
-        } elseif ($valor1 >= 2) {
-            $notification = ['type' => 'error', 'message' => 'Ya tienes un pedido registrado para esta fecha.'];
-        } else {
-            // Insertar pedidos
-            $sql = "INSERT INTO PedidosComida (Id_Empleado, Nom_Pedido, Usuario, Contrasena, Fecha, Lunes, Martes, Miercoles, Jueves, Viernes, Costo) 
-                    VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, 30)";
+        // Preparar datos
+        $desayunos = [
+            'lunes' => $lunesd,
+            'martes' => $martesd,
+            'miercoles' => $miercolesd,
+            'jueves' => $juevesd,
+            'viernes' => $viernesd
+        ];
+        
+        $comidas = [
+            'lunes' => $lunesc,
+            'martes' => $martesc,
+            'miercoles' => $miercolesc,
+            'jueves' => $juevesc,
+            'viernes' => $viernesc
+        ];
+        
+        // Intentar usar la API si está autenticado con JWT
+        if ($autenticado_jwt) {
+            // Verificar si puede ordenar para esta fecha
+            $verificacion = verificarPedidosExistentes($fecha);
             
-            $params1 = [$numemp, $usua, $cont, $fecha, $lunesd, $martesd, $miercolesd, $juevesd, $viernesd];
-            $params2 = [$numemp, $usua, $cont, $fecha, $lunesc, $martesc, $miercolesc, $juevesc, $viernesc];
-
-            $stmt = sqlsrv_query($conn, $sql, $params1);
-            $stmt1 = sqlsrv_query($conn, $sql, $params2);
-
-            if ($stmt && $stmt1) {
-                $notification = ['type' => 'success', 'message' => '¡Tu pedido se registró con éxito!'];
-                echo '<script>setTimeout(() => document.getElementById("menuForm").reset(), 1000);</script>';
+            if (!$verificacion['puede_ordenar']) {
+                $notification = ['type' => 'error', 'message' => $verificacion['mensaje']];
             } else {
-                $notification = ['type' => 'error', 'message' => 'Error al registrar el pedido. Inténtalo más tarde.'];
+                // Crear pedido a través de la API
+                $resultado = crearPedidoSemanal($fecha, $desayunos, $comidas);
+                
+                if ($resultado['success']) {
+                    $notification = ['type' => 'success', 'message' => $resultado['message']];
+                    echo '<script>setTimeout(() => document.getElementById("menuForm").reset(), 1000);</script>';
+                } else {
+                    $notification = ['type' => 'error', 'message' => $resultado['message']];
+                }
             }
-
-            if ($stmt) sqlsrv_free_stmt($stmt);
-            if ($stmt1) sqlsrv_free_stmt($stmt1);
+        } else {
+            // Usar conexión directa a SQL Server (para compatibilidad con sesión tradicional)
+            $serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
+            $connectionInfo = [
+                "Database" => "Comedor",
+                "UID" => "Larome03",
+                "PWD" => "Larome03",
+                "CharacterSet" => "UTF-8",
+                "TrustServerCertificate" => true,
+                "LoginTimeout" => 5
+            ];
+            
+            $conn = sqlsrv_connect($serverName, $connectionInfo);
+            
+            if (!$conn) {
+                $notification = ['type' => 'error', 'message' => 'Error de conexión con la base de datos.'];
+            } else {
+                // Verificar pedidos existentes
+                $sql3 = "SELECT COUNT(*) AS Total FROM PedidosComida WHERE Fecha = ? AND Id_Empleado = ?";
+                $stmt3 = sqlsrv_query($conn, $sql3, [$fecha, $id_empleado]);
+                $row = $stmt3 ? sqlsrv_fetch_array($stmt3, SQLSRV_FETCH_ASSOC) : null;
+                $valor1 = $row['Total'] ?? 0;
+                
+                if ($valor1 >= 2) {
+                    $notification = ['type' => 'error', 'message' => 'Ya tienes un pedido registrado para esta fecha.'];
+                } else {
+                    // Insertar pedidos
+                    $sql = "INSERT INTO PedidosComida (Id_Empleado, Nom_Pedido, Usuario, Contrasena, Fecha, Lunes, Martes, Miercoles, Jueves, Viernes, Costo) 
+                            VALUES (?, '', ?, '', ?, ?, ?, ?, ?, ?, 30)";
+                    
+                    $params1 = [$id_empleado, $usuario_bd, $fecha, $lunesd, $martesd, $miercolesd, $juevesd, $viernesd];
+                    $params2 = [$id_empleado, $usuario_bd, $fecha, $lunesc, $martesc, $miercolesc, $juevesc, $viernesc];
+                    
+                    $stmt = sqlsrv_query($conn, $sql, $params1);
+                    $stmt1 = sqlsrv_query($conn, $sql, $params2);
+                    
+                    if ($stmt && $stmt1) {
+                        $notification = ['type' => 'success', 'message' => '¡Tu pedido se registró con éxito!'];
+                        echo '<script>setTimeout(() => document.getElementById("menuForm").reset(), 1000);</script>';
+                    } else {
+                        $notification = ['type' => 'error', 'message' => 'Error al registrar el pedido. Inténtalo más tarde.'];
+                    }
+                    
+                    if ($stmt) sqlsrv_free_stmt($stmt);
+                    if ($stmt1) sqlsrv_free_stmt($stmt1);
+                }
+                
+                if ($stmt3) sqlsrv_free_stmt($stmt3);
+                sqlsrv_close($conn);
+            }
         }
-
-        if ($stmt2) sqlsrv_free_stmt($stmt2);
-        if ($stmt3) sqlsrv_free_stmt($stmt3);
     }
-}
-
-if ($conn) {
-    sqlsrv_close($conn);
 }
 
 // ==================================================
@@ -1327,17 +1393,12 @@ if ($num_semana_seleccionada > 0) {
     <div class="credential-field">
       <label><i class="fas fa-id-card"></i> ID Empleado</label>
       <input type="text" value="<?php echo htmlspecialchars($id_empleado); ?>" readonly class="readonly">
-      <span class="field-note">Precargado desde el sistema</span>
+      <span class="field-note">Obtenido desde la sesión JWT</span>
     </div>
     <div class="credential-field">
       <label><i class="fas fa-user"></i> Usuario</label>
       <input type="text" value="<?php echo htmlspecialchars($usuario_bd); ?>" readonly class="readonly">
-      <span class="field-note">Precargado desde el sistema</span>
-    </div>
-    <div class="credential-field">
-      <label><i class="fas fa-lock"></i> Contraseña</label>
-      <input type="password" value="<?php echo htmlspecialchars($contrasena_bd); ?>" readonly class="readonly">
-      <span class="field-note">Precargada desde el sistema</span>
+      <span class="field-note">Obtenido desde la sesión JWT</span>
     </div>
   </div>
   
@@ -1358,12 +1419,9 @@ if ($num_semana_seleccionada > 0) {
   </div>
 </div>
 
-<form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>?user_name=<?php echo urlencode($user_name); ?>&user_area=<?php echo urlencode($user_area); ?>" id="menuForm">
+<form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" id="menuForm">
 
-  <!-- Campos ocultos con los datos precargados -->
-  <input type="hidden" name="Nempleado" value="<?php echo htmlspecialchars($id_empleado); ?>">
-  <input type="hidden" name="Usuar" value="<?php echo htmlspecialchars($usuario_bd); ?>">
-  <input type="hidden" name="contrase" value="<?php echo htmlspecialchars($contrasena_bd); ?>">
+  <!-- Campo oculto con la semana seleccionada -->
   <input type="hidden" name="Fecha2" id="Fecha2Hidden" value="<?php echo htmlspecialchars($semana_seleccionada); ?>">
 
   <div class="week-grid">
@@ -1524,6 +1582,31 @@ if ($num_semana_seleccionada > 0) {
       if (!urlParams.has('semana')) {
         urlParams.set('semana', '2026-01-05');
         window.location.href = window.location.pathname + '?' + urlParams.toString();
+      }
+    }
+  });
+
+  // Detectar F5 en el iframe y notificar al padre para cerrar sesión
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'F5' || (event.ctrlKey && event.key === 'r')) {
+      event.preventDefault();
+      // Si está en iframe, notificar al padre
+      if (window.parent !== window) {
+        window.parent.location.href = '<?php echo getAppUrl("admicome4.php?logout=true"); ?>';
+      } else {
+        // Si es ventana independiente, redirigir directamente
+        window.location.href = '<?php echo getAppUrl("admicome4.php?logout=true"); ?>';
+      }
+    }
+  });
+  
+  // Detectar recarga desde cache
+  window.addEventListener('pageshow', function(event) {
+    if (event.persisted) {
+      if (window.parent !== window) {
+        window.parent.location.href = '<?php echo getAppUrl("admicome4.php?logout=true"); ?>';
+      } else {
+        window.location.href = '<?php echo getAppUrl("admicome4.php?logout=true"); ?>';
       }
     }
   });

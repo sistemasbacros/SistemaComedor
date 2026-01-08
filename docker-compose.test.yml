@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # Servicio PHP-FPM para TEST
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: comedor_php_test
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+      - ./php/custom.ini:/usr/local/etc/php/conf.d/custom.ini
+    environment:
+      - APP_ENV=test
+      - DB_HOST=${DB_HOST_TEST}
+      - DB_PORT=${DB_PORT_TEST:-1433}
+      - DB_DATABASE=${DB_DATABASE_TEST}
+      - DB_USERNAME=${DB_USERNAME_TEST}
+      - DB_PASSWORD=${DB_PASSWORD_TEST}
+    networks:
+      - comedor_network_test
+
+  # Servicio Nginx para TEST
+  nginx:
+    image: nginx:alpine
+    container_name: comedor_nginx_test
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT_TEST:-8080}:80"
+    volumes:
+      - .:/var/www/html
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - php
+    networks:
+      - comedor_network_test
+
+networks:
+  comedor_network_test:
+    driver: bridge

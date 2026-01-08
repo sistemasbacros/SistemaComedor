@@ -1,8 +1,12 @@
 <?php
-// Configuración de sesión mejorada
+// Cargar configuración global de la API
+require_once __DIR__ . '/config_api.php';
+
+// Configuración de sesión mejorada (path dinámico según entorno)
+$sessionPath = detectarEntorno() === 'local' ? '/' : '/Comedor/';
 session_set_cookie_params([
-    'lifetime' => 0,
-    'path' => '/Comedor/',
+    'lifetime' => 0, // Cookie de sesión - se elimina al cerrar pestaña o recargar
+    'path' => $sessionPath,
     'domain' => '',
     'secure' => false,
     'httponly' => true,
@@ -18,14 +22,19 @@ header("X-Content-Type-Options: nosniff");
 // Iniciar sesión
 session_start();
 
-// Configuración de conexión a la base de datos
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8"
-);
+// ==================================================
+// SEGURIDAD: DESTRUIR SESIÓN PREVIA AL CARGAR LOGIN
+// ==================================================
+// Por seguridad, al acceder a Admiin.php se destruye cualquier sesión existente
+// Esto obliga a hacer login cada vez (excepto durante el proceso de login POST)
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    // Solo destruir si NO es un envío de formulario
+    if (isset($_SESSION['authenticated_from_login']) && $_SESSION['authenticated_from_login'] === true) {
+        session_unset();
+        session_destroy();
+        session_start();
+    }
+}
 
 // Variables para el estado del login
 $loginError = '';
@@ -52,19 +61,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['usuario']) && isset($
         $_SESSION['login_token'] = bin2hex(random_bytes(32));
         $loginError = 'Error de sesión. Por favor, recargue la página e intente nuevamente.';
     } else {
-        $conn = sqlsrv_connect($serverName, $connectionOptions);
+        // ========== CONSUMIR API EXTERNA ==========
+        $apiUrl = getApiUrl('LOGIN');
         
-        if ($conn) {
-            // Consulta para verificar las credenciales
-            $sql = "SELECT Id_Empleado, Nombre, Area, Usuario, Contrasena 
-                    FROM Conped 
-                    WHERE Usuario = ? AND Contrasena = ?";
-            $params = array($usuario, $contrasena);
-            $stmt = sqlsrv_query($conn, $sql, $params);
+        apiDebugLog('Intentando login', ['usuario' => $usuario, 'api_url' => $apiUrl]);
+        
+        // Preparar datos para la API
+        $postData = json_encode([
+            'usuario' => $usuario,
+            'contrasena' => $contrasena
+        ]);
+        
+        // Inicializar cURL
+        $ch = curl_init($apiUrl);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'Content-Length: ' . strlen($postData)
+        ]);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, API_TIMEOUT);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, API_CONNECT_TIMEOUT);
+        
+        // Ejecutar petición
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+        
+        // Verificar si hubo error de conexión
+        if ($curlError) {
+            $loginError = 'Error de conexión con el servidor de autenticación: ' . $curlError;
+        } else {
+            // Decodificar respuesta JSON
+            $apiResponse = json_decode($response, true);
             
-            if ($stmt) {
-                if (sqlsrv_has_rows($stmt)) {
-                    $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            // Verificar si la autenticación fue exitosa (código 200)
+            if ($httpCode === 200 && isset($apiResponse['token'])) {
+                // ✅ AUTENTICACIÓN EXITOSA - Extraer datos de la respuesta
+                $row = [
+                    'Id_Empleado' => $apiResponse['user_info']['id_empleado'] ?? 0,
+                    'Nombre' => $apiResponse['user_info']['nombre'] ?? '',
+                    'Area' => $apiResponse['user_info']['area'] ?? '',
+                    'Usuario' => $apiResponse['user_info']['usuario'] ?? $usuario
+                ];
+                
+                // Verificar que los datos sean válidos
+                if ($row['Id_Empleado'] && $row['Nombre']) {
+                    
+                    // ========== DEBUG: INFORMACIÓN DEL USUARIO ==========
+                    error_log("========== LOGIN EXITOSO ==========");
+                    error_log("ID Empleado: " . $row['Id_Empleado']);
+                    error_log("Nombre: " . $row['Nombre']);
+                    error_log("Área: " . $row['Area']);
+                    error_log("Usuario: " . $row['Usuario']);
+                    error_log("===================================");
                     
                     // CREAR NUEVA SESIÓN COMPLETAMENTE DIFERENTE
                     session_regenerate_id(true);
@@ -79,6 +131,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['usuario']) && isset($
                     $_SESSION['authenticated_from_login'] = true;
                     $_SESSION['session_id'] = session_id();
                     $_SESSION['browser_fingerprint'] = md5($_SERVER['HTTP_USER_AGENT'] . $_SERVER['REMOTE_ADDR']);
+                    
+                    // ========== GUARDAR TOKEN JWT DE LA API ==========
+                    $_SESSION['jwt_token'] = $apiResponse['token'];
+                    $_SESSION['token_type'] = $apiResponse['token_type'] ?? 'Bearer';
+                    $_SESSION['token_expires_in'] = $apiResponse['expires_in'] ?? 86400;
+                    $_SESSION['token_created_at'] = time();
                     // Eliminado: $_SESSION['one_time_access'] = true; (causaba problemas)
                     
                     $loginSuccess = true;
@@ -88,8 +146,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['usuario']) && isset($
                     // VALIDACIÓN MEJORADA PARA DIRECCIÓN
                     $areaUpper = strtoupper(trim($userArea));
                     
-                    // Depuración: Mostrar el valor real del área
-                    error_log("Área detectada: " . $areaUpper);
+                    // ========== DEBUG: VALIDACIÓN DE ÁREA ==========
+                    error_log("========== VALIDACIÓN DE ÁREA ==========");
+                    error_log("Área Original: '" . $userArea . "'");
+                    error_log("Área Mayúsculas: '" . $areaUpper . "'");
+                    error_log("Longitud del texto: " . strlen($areaUpper));
+                    error_log("Bytes del texto: " . bin2hex($areaUpper));
+                    error_log("==========================================");
                     
                     // Verificar diferentes formas de escribir "DIRECCIÓN"
                     $isDireccion = false;
@@ -121,31 +184,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['usuario']) && isset($
                     }
                     
                     // Depuración: Verificar si pasó la validación
-                    error_log("¿Es dirección? " . ($isDireccion ? 'Sí' : 'No'));
+                    error_log("========== RESULTADO VALIDACIÓN ==========");
+                    error_log("¿Es dirección? " . ($isDireccion ? 'SÍ' : 'NO'));
+                    error_log("==========================================");
                     
                     if ($isDireccion) {
+                        error_log(">>> MOSTRANDO MODAL DE SELECCIÓN DE ROL <<<");
+                        error_log("Usuario: " . $userName);
                         $showRoleSelection = true;
                         // No redirigir inmediatamente, mostrar el modal de selección
-                        // Depuración
-                        error_log("Mostrando modal para: " . $userName);
                     } else {
+                        error_log(">>> REDIRIGIENDO A MenUsuario.php <<<");
+                        error_log("Área: " . $userArea);
+                        error_log("URL destino: " . getAppUrl('MenUsuario.php'));
+                        
                         // Para otras áreas, redirigir directamente a MenUsuario.php
-                        error_log("Redirigiendo a MenUsuario.php para: " . $userArea);
-                        header("Location: http://desarollo-bacros/Comedor/MenUsuario.php");
+                        header("Location: " . getAppUrl('MenUsuario.php'));
                         exit;
                     }
-                    
                 } else {
-                    $loginError = 'Usuario o contraseña incorrectos';
+                    $loginError = 'Datos de usuario incompletos en la respuesta de la API';
                 }
             } else {
-                $loginError = 'Error en la consulta a la base de datos';
+                // ❌ AUTENTICACIÓN FALLIDA
+                if (isset($apiResponse['error'])) {
+                    $loginError = $apiResponse['error'];
+                } elseif (isset($apiResponse['message'])) {
+                    $loginError = $apiResponse['message'];
+                } else {
+                    $loginError = 'Usuario o contraseña incorrectos (Código: ' . $httpCode . ')';
+                }
             }
-            
-            if ($stmt) sqlsrv_free_stmt($stmt);
-            sqlsrv_close($conn);
-        } else {
-            $loginError = 'Error de conexión a la base de datos';
         }
         
         // Regenerar token después del intento (éxito o fracaso)
@@ -158,10 +227,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['role_selection'])) {
     $selectedRole = $_POST['role_selection'];
     
     if ($selectedRole === 'admin') {
-        header("Location: http://desarollo-bacros/Comedor/admicome4.php");
+        header("Location: " . getAppUrl('admicome4.php'));
         exit;
     } elseif ($selectedRole === 'user') {
-        header("Location: http://desarollo-bacros/Comedor/MenUsuario.php");
+        header("Location: " . getAppUrl('MenUsuario.php'));
         exit;
     }
 }
@@ -663,6 +732,18 @@ if (!isset($_SESSION['login_token'])) {
                 </div>
             <?php endif; ?>
             
+            <?php if (API_DEBUG && $loginSuccess): ?>
+                <div class="alert alert-info" style="background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #dbeafe; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 12px; text-align: left;">
+                    <strong>🔍 DEBUG MODE</strong><br>
+                    <strong>ID:</strong> <?php echo $row['Id_Empleado'] ?? 'N/A'; ?><br>
+                    <strong>Nombre:</strong> <?php echo $userName; ?><br>
+                    <strong>Área:</strong> '<?php echo $userArea; ?>'<br>
+                    <strong>Área (upper):</strong> '<?php echo strtoupper(trim($userArea)); ?>'<br>
+                    <strong>¿Es Dirección?:</strong> <?php echo $isDireccion ? 'SÍ' : 'NO'; ?><br>
+                    <strong>Acción:</strong> <?php echo $isDireccion ? 'Mostrar modal' : 'Redirigir a MenUsuario.php'; ?>
+                </div>
+            <?php endif; ?>
+            
             <form method="POST" action="" id="loginForm" autocomplete="off">
                 <input type="hidden" name="login_token" value="<?php echo htmlspecialchars($_SESSION['login_token'] ?? ''); ?>">
                 <div class="mb-3">
@@ -743,9 +824,9 @@ if (!isset($_SESSION['login_token'])) {
             // Redirigir según la selección
             setTimeout(function() {
                 if (role === 'admin') {
-                    window.location.href = 'http://desarollo-bacros/Comedor/admicome4.php';
+                    window.location.href = '<?php echo getAppUrl("admicome4.php"); ?>';
                 } else {
-                    window.location.href = 'http://desarollo-bacros/Comedor/MenUsuario.php';
+                    window.location.href = '<?php echo getAppUrl("MenUsuario.php"); ?>';
                 }
             }, 500);
         }

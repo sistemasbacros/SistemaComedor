@@ -1,5 +1,22 @@
 <?php
+// ==================================================
+// MIGRACIÓN A API - AgendaPedidos1.php
+// ==================================================
+
 session_start();
+
+// Cargar configuración de la API y cliente
+require_once __DIR__ . '/config_api.php';
+require_once __DIR__ . '/api_client.php';
+
+// Verificar autenticación (JWT o sesión tradicional)
+$api = getAPIClient();
+
+// Verificar autenticación con API
+if (!$api->isAuthenticated()) {
+    header("Location: " . getAppUrl('Admiin.php'));
+    exit;
+}
 
 // Obtener información del usuario desde la sesión
 $user_name = $_SESSION['user_name'] ?? '';
@@ -7,24 +24,18 @@ $user_area = $_SESSION['user_area'] ?? '';
 
 // Si no hay sesión activa, redirigir al login
 if (empty($user_name)) {
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: " . getAppUrl('Admiin.php'));
     exit;
 }
 
-// Función para obtener todos los lunes entre dos fechas
-function obtenerLunes($fecha_inicio = null, $fecha_fin = null) {
-    if ($fecha_inicio === null) {
-        $fecha_inicio = date('Y-m-d'); // Hoy
-    }
-    if ($fecha_fin === null) {
-        $fecha_fin = date('Y-m-d', strtotime('+2 months')); // Dos meses después
-    }
-    
+// ==================================================
+// FUNCIÓN HELPER: Generar semanas localmente (fallback)
+// ==================================================
+function obtenerLunesLocal() {
     $lunes = [];
-    $fecha_actual = date('Y-m-d', strtotime('monday this week', strtotime($fecha_inicio)));
+    $fecha_actual = date('Y-m-d', strtotime('monday this week'));
     
-    // Agregar todos los lunes hasta la fecha fin
-    while (strtotime($fecha_actual) <= strtotime($fecha_fin)) {
+    for ($i = 0; $i < 9; $i++) {
         $lunes[] = $fecha_actual;
         $fecha_actual = date('Y-m-d', strtotime($fecha_actual . ' +1 week'));
     }
@@ -32,93 +43,128 @@ function obtenerLunes($fecha_inicio = null, $fecha_fin = null) {
     return $lunes;
 }
 
-// Función para filtrar lunes: mantener solo la semana en curso y futuras
-function filtrarLunesPasados($lunes_array) {
-    $lunes_filtrados = [];
-    $hoy = date('Y-m-d');
-    $lunes_semana_actual = date('Y-m-d', strtotime('monday this week'));
+// ==================================================
+// OBTENER SEMANAS DISPONIBLES DESDE LA API
+// ==================================================
+
+$lunes_filtrados = [];
+$semana_actual = '';
+$error_semanas = null;
+
+$response_semanas = obtenerSemanasDisponibles();
+
+if ($response_semanas['success']) {
+    $data_semanas = $response_semanas['data'];
+    $semana_actual = $data_semanas['semana_actual'] ?? date('Y-m-d', strtotime('monday this week'));
     
-    foreach ($lunes_array as $lunes) {
-        // Siempre incluir el lunes de la semana en curso
-        if ($lunes == $lunes_semana_actual) {
-            $lunes_filtrados[] = $lunes;
+    // Convertir las semanas al formato esperado
+    if (isset($data_semanas['semanas']) && is_array($data_semanas['semanas'])) {
+        foreach ($data_semanas['semanas'] as $semana) {
+            if (isset($semana['fecha'])) {
+                $lunes_filtrados[] = $semana['fecha'];
+            }
         }
-        // Incluir lunes futuros
-        elseif (strtotime($lunes) > strtotime($hoy)) {
-            $lunes_filtrados[] = $lunes;
-        }
-        // Para lunes pasados (que no son de esta semana), no incluirlos
     }
     
-    return $lunes_filtrados;
+    // Si no se obtuvieron semanas, usar fallback
+    if (empty($lunes_filtrados)) {
+        $lunes_filtrados = obtenerLunesLocal();
+        $semana_actual = $lunes_filtrados[0] ?? date('Y-m-d', strtotime('monday this week'));
+    }
+} else {
+    $error_semanas = $response_semanas['error'];
+    
+    // Fallback: generar semanas localmente si la API falla
+    $lunes_filtrados = obtenerLunesLocal();
+    $semana_actual = $lunes_filtrados[0] ?? date('Y-m-d', strtotime('monday this week'));
 }
 
-// Obtener lunes desde la semana en curso hasta 2 meses después
-$lunes_todos = obtenerLunes();
-// Filtrar para quitar lunes pasados (excepto el de la semana en curso)
-$lunes_filtrados = filtrarLunesPasados($lunes_todos);
-
-// Obtener fecha actual para la semana en curso
-$fecha_actual = date('Y-m-d');
-$lunes_semana_actual = date('Y-m-d', strtotime('monday this week'));
-
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+// ==================================================
+// OBTENER CONSUMOS DE LA SEMANA
+// ==================================================
 
 // Variables para almacenar resultados
 $resultados_tabla = [];
 $total_consumos = 0;
-$fecha_consulta = $lunes_semana_actual; // Por defecto semana en curso
+$fecha_consulta = null;
+$error_consumos = null;
 
-// Determinar qué fecha usar para la consulta
+// Solo consultar consumos cuando el usuario envía el formulario (POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fec']) && !empty($_POST['fec'])) {
-    // Si se envió una fecha por POST, usar esa
     $fecha_consulta = test_input($_POST['fec']);
-} else {
-    // Si no hay POST, usar la semana en curso por defecto
-    $fecha_consulta = $lunes_semana_actual;
-}
-
-// Realizar consulta con el nombre de usuario de la sesión
-if (!empty($user_name) && !empty($fecha_consulta)) {
-    // Query dinámico basado en el nombre de usuario y fecha
-    $sql_dinamico = "SELECT Fecha, c.Id_Empleado, Nombre, 
-                    ISNULL(Lunes, '') as Lunes, 
-                    ISNULL(Martes, '') as Martes, 
-                    ISNULL(Miercoles, '') as Miercoles,
-                    ISNULL(Jueves, '') as Jueves,
-                    ISNULL(Viernes, '') as Viernes 
-                    FROM (SELECT Id_Empleado, Nombre, Area 
-                          FROM [dbo].[Catalogo_EmpArea] 
-                          WHERE Nombre = ?) as a
-                    LEFT JOIN
-                    (SELECT * FROM [dbo].[PedidosComida] WHERE Fecha = ?) as c
-                    ON a.Id_Empleado = c.Id_Empleado";
     
-    $params = array($user_name, $fecha_consulta);
-    $stmt_dinamico = sqlsrv_query($conn, $sql_dinamico, $params);
-    
-    if ($stmt_dinamico === false) {
-        die(print_r(sqlsrv_errors(), true));
-    }
-    
-    // Procesar resultados
-    while ($row = sqlsrv_fetch_array($stmt_dinamico, SQLSRV_FETCH_ASSOC)) {
-        $resultados_tabla[] = $row;
+    // Obtener consumos desde la API
+    if (!empty($user_name) && !empty($fecha_consulta)) {
+        $response_consumos = obtenerConsumosSemanales($fecha_consulta);
         
-        // Calcular total de consumos para esta fila
-        $consumos_semana = 0;
-        if (!empty($row['Lunes']) && ($row['Lunes'] === 'Desayuno' || $row['Lunes'] === 'Comida')) $consumos_semana++;
-        if (!empty($row['Martes']) && ($row['Martes'] === 'Desayuno' || $row['Martes'] === 'Comida')) $consumos_semana++;
-        if (!empty($row['Miercoles']) && ($row['Miercoles'] === 'Desayuno' || $row['Miercoles'] === 'Comida')) $consumos_semana++;
-        if (!empty($row['Jueves']) && ($row['Jueves'] === 'Desayuno' || $row['Jueves'] === 'Comida')) $consumos_semana++;
-        if (!empty($row['Viernes']) && ($row['Viernes'] === 'Desayuno' || $row['Viernes'] === 'Comida')) $consumos_semana++;
+        // DEBUG: Ver la respuesta completa
+        error_log("=== DEBUG CONSUMOS ===");
+        error_log("Response completo: " . print_r($response_consumos, true));
         
-        $total_consumos += $consumos_semana;
+        if ($response_consumos['success']) {
+            $data = $response_consumos['data'];
+            
+            // DEBUG: Ver estructura de data
+            error_log("Data recibido: " . print_r($data, true));
+            
+            // La API puede devolver un wrapper extra con 'success' y 'data'
+            // Detectar y desempaquetar si existe
+            if (isset($data['success']) && isset($data['data'])) {
+                error_log("Detectado wrapper extra, desempaquetando...");
+                $data = $data['data'];
+            }
+            
+            error_log("Tiene empleado? " . (isset($data['empleado']) ? 'SI' : 'NO'));
+            error_log("Tiene desglose? " . (isset($data['desglose']) ? 'SI (' . count($data['desglose']) . ' items)' : 'NO'));
+            error_log("Tiene total_consumos? " . (isset($data['total_consumos']) ? 'SI' : 'NO'));
+            
+            // Validar estructura de datos de la API
+            if (isset($data['empleado'], $data['desglose']) && is_array($data['desglose'])) {
+                // Crear matriz de consumos agrupados por tipo
+                $consumos_matriz = [
+                    'Desayuno' => ['Lunes' => '', 'Martes' => '', 'Miercoles' => '', 'Jueves' => '', 'Viernes' => ''],
+                    'Comida' => ['Lunes' => '', 'Martes' => '', 'Miercoles' => '', 'Jueves' => '', 'Viernes' => '']
+                ];
+                
+                // Llenar la matriz con los datos del desglose
+                foreach ($data['desglose'] as $consumo) {
+                    $dia = $consumo['dia'] ?? '';
+                    $tipo = $consumo['tipo'] ?? '';
+                    
+                    // Normalizar el nombre del día (sin acentos para el array)
+                    $dia_normalizado = str_replace('é', 'e', $dia);
+                    
+                    if (isset($consumos_matriz[$tipo][$dia_normalizado])) {
+                        $consumos_matriz[$tipo][$dia_normalizado] = $tipo;
+                    }
+                }
+                
+                // Crear 2 filas: una para Desayuno y otra para Comida
+                foreach ($consumos_matriz as $tipo => $dias) {
+                    $resultados_tabla[] = [
+                        'Fecha' => $data['fecha_consulta'] ?? $fecha_consulta,
+                        'Id_Empleado' => $data['empleado']['id_empleado'] ?? '',
+                        'Nombre' => $data['empleado']['nombre'] ?? $user_name,
+                        'Tipo' => $tipo,
+                        'Lunes' => $dias['Lunes'],
+                        'Martes' => $dias['Martes'],
+                        'Miercoles' => $dias['Miercoles'],
+                        'Jueves' => $dias['Jueves'],
+                        'Viernes' => $dias['Viernes']
+                    ];
+                }
+                
+                $total_consumos = $data['total_consumos'] ?? count($data['desglose']);
+                error_log("✓ Datos procesados correctamente. Total consumos: $total_consumos, Filas generadas: " . count($resultados_tabla));
+            } else {
+                $error_consumos = 'La API devolvió datos en formato incorrecto. Revisa los logs del servidor.';
+                error_log("ERROR: Validación fallida - No se encontró empleado o desglose");
+            }
+        } else {
+            $error_consumos = $response_consumos['error'];
+            error_log("ERROR API: " . $error_consumos);
+        }
     }
-    
-    sqlsrv_free_stmt($stmt_dinamico);
 }
 
 function test_input($data) {
@@ -404,6 +450,22 @@ function test_input($data) {
         <!-- Título -->
         <h1>Consulta de Consumos Semanales</h1>
 
+        <!-- Mostrar errores de API si existen -->
+        <?php if ($error_semanas || $error_consumos): ?>
+            <div class="glass-card">
+                <div class="alert alert-warning" role="alert">
+                    <strong>⚠️ Modo Limitado:</strong>
+                    <?php if ($error_semanas): ?>
+                        <p>Error al obtener semanas desde la API: <?php echo htmlspecialchars($error_semanas); ?></p>
+                        <p><small>Usando generación local de semanas como respaldo.</small></p>
+                    <?php endif; ?>
+                    <?php if ($error_consumos): ?>
+                        <p>Error al obtener consumos: <?php echo htmlspecialchars($error_consumos); ?></p>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <!-- Formulario -->
         <div class="glass-card">
             <form method="POST" action="">
@@ -418,12 +480,12 @@ function test_input($data) {
                                 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fec'])) {
                                     $selected = ($_POST['fec'] == $lunes) ? 'selected' : '';
                                 } else {
-                                    $selected = ($lunes == $lunes_semana_actual) ? 'selected' : '';
+                                    $selected = ($lunes == $semana_actual) ? 'selected' : '';
                                 }
                             ?>
                                 <option value="<?php echo $lunes; ?>" <?php echo $selected; ?>>
                                     <?php echo $fecha_formateada; ?>
-                                    <?php echo ($lunes == $lunes_semana_actual) ? '(Semana en curso)' : ''; ?>
+                                    <?php echo ($lunes == $semana_actual) ? '(Semana en curso)' : ''; ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
@@ -439,21 +501,23 @@ function test_input($data) {
                     <button type="submit" class="btn btn-primary">Buscar Consumos</button>
                 </div>
 
-                <?php if (!empty($resultados_tabla)): ?>
-                    <div id="NC" class="mt-4 text-center">
-                        Tienes <?php echo $total_consumos; ?> consumos para esta semana
-                    </div>
-                <?php else: ?>
-                    <div id="NC" class="mt-4 text-center">
-                        <?php echo empty($resultados_tabla) ? 'No se encontraron consumos para esta semana' : 'No. consumos semanales:'; ?>
-                    </div>
+                <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
+                    <?php if (!empty($resultados_tabla)): ?>
+                        <div id="NC" class="mt-4 text-center">
+                            Tienes <?php echo $total_consumos; ?> consumos para esta semana
+                        </div>
+                    <?php else: ?>
+                        <div id="NC" class="mt-4 text-center">
+                            No se encontraron consumos para esta semana
+                        </div>
+                    <?php endif; ?>
                 <?php endif; ?>
             </form>
         </div>
 
         <!-- Tabla -->
         <div class="glass-card">
-            <?php if (!empty($resultados_tabla)): ?>
+            <?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($resultados_tabla)): ?>
                 <div class="alert alert-info">
                     Mostrando consumos para: <strong><?php echo htmlspecialchars($user_name); ?></strong> - 
                    <strong><?php echo date('d/m/Y', strtotime($fecha_consulta)); ?></strong>
@@ -476,7 +540,7 @@ function test_input($data) {
                         <tbody>
                             <?php foreach ($resultados_tabla as $fila): ?>
                                 <tr>
-                                    <td><?php echo !empty($fila['Fecha']) ? date('d/m/Y', strtotime($fila['Fecha'])) : date('d/m/Y', strtotime($fecha_consulta)); ?></td>
+                                    <td><?php echo !empty($fila['Fecha']) ? date('d/m/Y', strtotime($fila['Fecha'])) : ''; ?></td>
                                     <td><?php echo htmlspecialchars($fila['Id_Empleado'] ?? ''); ?></td>
                                     <td><?php echo htmlspecialchars($fila['Nombre'] ?? ''); ?></td>
                                     <td><?php echo htmlspecialchars($fila['Lunes'] ?? ''); ?></td>
@@ -491,8 +555,8 @@ function test_input($data) {
                 </div>
             <?php else: ?>
                 <div class="text-center py-4">
-                    <p>Selecciona una fecha para consultar tus consumos.</p>
-                    <p class="text-muted">Por defecto se muestran los consumos de la semana en curso.</p>
+                    <p><strong>Selecciona una semana y presiona "Buscar Consumos"</strong></p>
+                    <p class="text-muted">Aquí se mostrarán tus consumos de alimentos de la semana seleccionada.</p>
                 </div>
             <?php endif; ?>
         </div>
