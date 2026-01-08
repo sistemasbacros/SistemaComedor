@@ -9,7 +9,15 @@
 function detectarEntorno() {
     $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
     
-    // Si contiene localhost o 127.0.0.1, es entorno local
+    // Detectar si está en Docker
+    $enDocker = file_exists('/.dockerenv');
+    
+    // Si está en Docker y accede por localhost (puerto 80), es producción
+    if ($enDocker && (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false)) {
+        return 'produccion';
+    }
+    
+    // Si contiene localhost o 127.0.0.1 y NO está en Docker, es entorno local
     if (strpos($host, 'localhost') !== false || 
         strpos($host, '127.0.0.1') !== false ||
         strpos($host, '192.168.') !== false) {
@@ -33,8 +41,8 @@ $entorno = detectarEntorno();
 // URLs base de la API según el entorno
 $API_CONFIG = [
     'local' => [
-        'base_url' => 'http://host.docker.internal:3000',   // API Backend (Node.js puerto 3000) - Desde Docker
-        'app_url' => 'http://localhost:8000',    // Frontend PHP (puerto 8000)
+        'base_url' => 'http://localhost:3000',   // API Backend (Node.js puerto 3000) - Desarrollo local
+        'app_url' => 'http://localhost:8000',    // Frontend PHP (puerto 8000) - Desarrollo local
         'timeout' => 10,
         'connect_timeout' => 5,
         'debug' => true
@@ -47,8 +55,8 @@ $API_CONFIG = [
         'debug' => true
     ],
     'produccion' => [
-        'base_url' => 'https://api.bacrocorp.com',           // API Backend (cambiar URL)
-        'app_url' => 'https://bacrocorp.com/Comedor',        // Frontend PHP (cambiar URL)
+        'base_url' => 'http://host.docker.internal:3000',    // API Backend desde Docker
+        'app_url' => 'http://localhost',                      // Frontend PHP en puerto 80
         'timeout' => 20,
         'connect_timeout' => 10,
         'debug' => false
