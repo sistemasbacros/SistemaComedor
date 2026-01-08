@@ -23,17 +23,17 @@ jobs:
       
       - name: 📂 Create deploy directory
         run: |
-          if (-not (Test-Path '$env:DEPLOY_PATH')) {
-            New-Item -Path '$env:DEPLOY_PATH' -ItemType Directory -Force
+          if (-not (Test-Path "$env:DEPLOY_PATH")) {
+            New-Item -Path "$env:DEPLOY_PATH" -ItemType Directory -Force
             Write-Host "OK: Directorio de despliegue creado"
           }
         shell: powershell
       
       - name: 📋 Copy .env if not exists
         run: |
-          if (-not (Test-Path '$env:DEPLOY_PATH\.env')) {
+          if (-not (Test-Path "$env:DEPLOY_PATH\.env")) {
             if (Test-Path '.env.example') {
-              Copy-Item -Path '.env.example' -Destination '$env:DEPLOY_PATH\.env' -Force
+              Copy-Item -Path '.env.example' -Destination "$env:DEPLOY_PATH\.env" -Force
               Write-Host "WARNING: Archivo .env creado desde template"
               Write-Host "WARNING: IMPORTANTE: Configurar manualmente con credenciales de PRODUCCIÓN"
               Write-Host "ERROR: Detener el deployment y configurar .env antes de continuar"
@@ -46,10 +46,10 @@ jobs:
       
       - name: 💾 Backup current deployment
         run: |
-          if (Test-Path '$env:DEPLOY_PATH') {
-            $backupPath = '$env:DEPLOY_PATH\..\ComedorProduccion_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')'
+          if (Test-Path "$env:DEPLOY_PATH") {
+            $backupPath = "$env:DEPLOY_PATH\..\ComedorProduccion_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
             Write-Host "INFO: Creando backup en:" $backupPath
-            Copy-Item -Path '$env:DEPLOY_PATH' -Destination '$backupPath' -Recurse -Force
+            Copy-Item -Path "$env:DEPLOY_PATH" -Destination "$backupPath" -Recurse -Force
             Write-Host "OK: Backup creado exitosamente"
           } else {
             Write-Host "INFO: No hay deployment previo para hacer backup"
@@ -107,7 +107,7 @@ jobs:
         run: |
           cd $env:DEPLOY_PATH
           
-          if (Test-Path '$env:COMPOSE_FILE') {
+          if (Test-Path "$env:COMPOSE_FILE") {
             Write-Host "INFO: Deteniendo contenedores de PRODUCCIÓN..."
             docker compose -f $env:COMPOSE_FILE down
             Write-Host "OK: Contenedores detenidos"
@@ -184,7 +184,7 @@ jobs:
           $healthy = $false
           
           # Leer el puerto del archivo .env
-          $envContent = Get-Content '$env:DEPLOY_PATH\.env'
+          $envContent = Get-Content "$env:DEPLOY_PATH\.env"
           $port = 80
           foreach ($line in $envContent) {
             if ($line -match 'HTTP_PORT=(\d+)') {
@@ -196,7 +196,7 @@ jobs:
           while ($attempt -lt $maxAttempts) {
             try {
               Start-Sleep -Seconds 3
-              $response = Invoke-WebRequest -Uri 'http://localhost:$port' -UseBasicParsing -TimeoutSec 5
+              $response = Invoke-WebRequest -Uri "http://localhost:$port" -UseBasicParsing -TimeoutSec 5
               
               if ($response.StatusCode -eq 200) {
                 Write-Host "OK: Servidor de PRODUCCIÓN respondiendo correctamente: $($response.StatusCode)"
@@ -236,7 +236,7 @@ jobs:
           cd $env:DEPLOY_PATH
           
           # Leer el puerto del archivo .env
-          $envContent = Get-Content '$env:DEPLOY_PATH\.env'
+          $envContent = Get-Content "$env:DEPLOY_PATH\.env"
           $port = 80
           foreach ($line in $envContent) {
             if ($line -match 'HTTP_PORT=(\d+)') {
@@ -252,7 +252,7 @@ jobs:
           Write-Host ""
           Write-Host "Ubicación: $env:DEPLOY_PATH"
           Write-Host "URL: http://localhost:$port"
-          Write-Host "Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')'
+          Write-Host "Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Host "Commit: $env:GITHUB_SHA"
           Write-Host "Autor: $env:GITHUB_ACTOR"
           Write-Host "Branch: main (PRODUCCIÓN)"
@@ -281,14 +281,14 @@ jobs:
           Write-Host ""
           
           # Intentar restaurar desde el último backup
-          $backupFolders = Get-ChildItem -Path '$env:DEPLOY_PATH\..' -Directory -Filter 'ComedorProduccion_backup_*' | Sort-Object Name -Descending
+          $backupFolders = Get-ChildItem -Path "$env:DEPLOY_PATH\.." -Directory -Filter "ComedorProduccion_backup_*" | Sort-Object Name -Descending
           
           if ($backupFolders.Count -gt 0) {
             $latestBackup = $backupFolders[0].FullName
             Write-Host "INFO: Último backup disponible: $latestBackup"
             Write-Host "INFO: Para restaurar ejecuta:"
-            Write-Host "       Remove-Item -Path '$env:DEPLOY_PATH' -Recurse -Force'
-            Write-Host "       Copy-Item -Path '$latestBackup' -Destination '$env:DEPLOY_PATH' -Recurse'
+            Write-Host "       Remove-Item -Path '$env:DEPLOY_PATH' -Recurse -Force"
+            Write-Host "       Copy-Item -Path '$latestBackup' -Destination '$env:DEPLOY_PATH' -Recurse"
             Write-Host "       cd $env:DEPLOY_PATH"
             Write-Host "       docker compose -f $env:COMPOSE_FILE up -d"
           }

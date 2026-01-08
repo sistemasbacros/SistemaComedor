@@ -237,7 +237,7 @@ jobs:
           Write-Host ''
           Write-Host "Ubicación: $env:DEPLOY_PATH"
           Write-Host "URL: http://localhost:$port"
-          Write-Host "Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+          Write-Host "Fecha: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
           Write-Host "Commit: $env:GITHUB_SHA"
           Write-Host "Autor: $env:GITHUB_ACTOR"
           Write-Host ''
