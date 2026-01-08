@@ -20,8 +20,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar drivers de SQL Server para PHP
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+RUN curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
     && curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && sed -i 's/deb /deb [signed-by=\/usr\/share\/keyrings\/microsoft-prod.gpg] /' /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
     && ACCEPT_EULA=Y apt-get install -y \
         msodbcsql18 \
