@@ -1,0 +1,37 @@
+# Archivos de entorno
+.env
+.env.local
+.env.*.local
+
+# Logs
+nginx/logs/*.log
+*.log
+
+# Backups
+*.backup
+*.bak
+
+# Archivos temporales
+*.tmp
+*.temp
+*.swp
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Node modules (si se usan en el futuro)
+node_modules/
+
+# Composer (si se usa)
+vendor/
+
+# Cache de PHP
+*.cache

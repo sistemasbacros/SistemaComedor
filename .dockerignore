@@ -1,0 +1,20 @@
+# Ignorar archivos de entorno
+.env
+.env.local
+.env.*.local
+
+# Ignorar logs
+nginx/logs/*.log
+*.log
+
+# Ignorar archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Ignorar backups
+*.backup
+*.bak
+
+# Ignorar archivos temporales
+*.tmp
+*.temp
