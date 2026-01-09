@@ -9,7 +9,7 @@ session_set_cookie_params([
     'path' => '/Comedor/',
     'domain' => '',
     'secure' => false,
-    'httponly' => true,
+    'httpononly' => true,
     'samesite' => 'Strict'
 ]);
 
@@ -80,6 +80,33 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 // Actualizar tiempo de actividad
 $_SESSION['LAST_ACTIVITY'] = time();
+
+// ==================================================
+// CONTROL DE PERMISOS POR USUARIO
+// ==================================================
+
+// Obtener información del usuario desde la sesión
+$user_name = $_SESSION['user_name'] ?? 'Administrador';
+$user_area = $_SESSION['user_area'] ?? 'Sistema de Comedor';
+
+// Definir usuarios con permisos restringidos
+$usuarios_restringidos = ['CIENEGA JASSO MIRIAM'];
+
+// Determinar si el usuario actual tiene acceso completo o restringido
+$usuario_actual = strtoupper(trim($user_name));
+$acceso_completo = !in_array($usuario_actual, $usuarios_restringidos);
+
+// Si el usuario es CIENEGA JASSO MIRIAM, solo mostrar Reportes y Cerrar Sesión
+if (!$acceso_completo) {
+    // Forzar que la sección activa sea Reportes para este usuario
+    $_GET['section'] = 'reportes';
+    
+    // También podemos agregar un mensaje informativo en la sesión
+    if (!isset($_SESSION['restriccion_info'])) {
+        $_SESSION['restriccion_info'] = "Su usuario tiene acceso restringido solo a la sección de Reportes.";
+    }
+}
+
 // ==================================================
 // FIN DE PROTECCIÓN - TU CÓDIGO ORIGINAL COMIENZA AQUÍ
 // ==================================================
@@ -192,8 +219,32 @@ $total_gastos_basenueva = 0;
 $total_gastos_contpaq = 0;
 $total_registros_contpaq = 0;
 
-// Variables para la gráfica de tendencia (removidas según solicitud)
-// $tendencia_diaria = array();
+// NUEVAS VARIABLES PARA CONTROL DE PRECIOS POR FECHA
+$fecha_cambio_precios = '2026-01-01';
+$precio_desayuno_viejo = 30;
+$precio_comida_viejo = 30;
+$precio_desayuno_nuevo = 35;
+$precio_comida_nuevo = 45;
+
+// Variables para el cálculo detallado de montos por periodo de precio
+$monto_desayunos_antes_2026 = 0;
+$monto_desayunos_desde_2026 = 0;
+$monto_comidas_antes_2026 = 0;
+$monto_comidas_desde_2026 = 0;
+$total_desayunos_antes_2026 = 0;
+$total_desayunos_desde_2026 = 0;
+$total_comidas_antes_2026 = 0;
+$total_comidas_desde_2026 = 0;
+
+// Variables para el cálculo detallado de exentos por periodo de precio
+$monto_exentos_desayunos_antes_2026 = 0;
+$monto_exentos_desayunos_desde_2026 = 0;
+$monto_exentos_comidas_antes_2026 = 0;
+$monto_exentos_comidas_desde_2026 = 0;
+$total_exentos_desayunos_antes_2026 = 0;
+$total_exentos_desayunos_desde_2026 = 0;
+$total_exentos_comidas_antes_2026 = 0;
+$total_exentos_comidas_desde_2026 = 0;
 
 try {
     // Conexión a la base de datos principal
@@ -215,7 +266,7 @@ try {
             $total_usuarios = $row['Total_Usuarios'];
         }
         
-        // NUEVA CONSULTA: Obtener desglose de consumos por persona exenta
+        // NUEVA CONSULTA: Obtener desglose de consumos por persona exenta CON DIFERENCIACIÓN POR FECHA
         $sql_desglose_exentos = "SELECT 
             CASE 
                 WHEN nombre LIKE '%ALEJANDRA CRUZ%' THEN 'ALEJANDRA CRUZ'
@@ -228,8 +279,15 @@ try {
                 WHEN nombre LIKE '%VIGILANCIA%' THEN 'VIGILANCIA'
                 ELSE nombre
             END as persona_exenta,
-            COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' THEN 1 END) AS desayunos,
-            COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' THEN 1 END) AS comidas,
+            -- Desayunos antes y después del cambio
+            COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' AND convert(date, Hora_Entrada, 103) < '2026-01-01' THEN 1 END) AS desayunos_antes_2026,
+            COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' AND convert(date, Hora_Entrada, 103) >= '2026-01-01' THEN 1 END) AS desayunos_desde_2026,
+            -- Comidas antes y después del cambio
+            COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' AND convert(date, Hora_Entrada, 103) < '2026-01-01' THEN 1 END) AS comidas_antes_2026,
+            COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' AND convert(date, Hora_Entrada, 103) >= '2026-01-01' THEN 1 END) AS comidas_desde_2026,
+            -- Totales
+            COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' THEN 1 END) AS desayunos_total,
+            COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' THEN 1 END) AS comidas_total,
             COUNT(*) as total_consumos
         FROM Entradas
         WHERE not nombre='.' and not nombre='' and not nombre LIKE '[0-9]%'
@@ -255,27 +313,52 @@ try {
         if ($stmt_desglose !== false) {
             while ($row = sqlsrv_fetch_array($stmt_desglose, SQLSRV_FETCH_ASSOC)) {
                 $persona = $row['persona_exenta'];
-                $desayunos = $row['desayunos'] ?? 0;
-                $comidas = $row['comidas'] ?? 0;
+                $desayunos_antes_2026 = $row['desayunos_antes_2026'] ?? 0;
+                $desayunos_desde_2026 = $row['desayunos_desde_2026'] ?? 0;
+                $comidas_antes_2026 = $row['comidas_antes_2026'] ?? 0;
+                $comidas_desde_2026 = $row['comidas_desde_2026'] ?? 0;
+                $desayunos_total = $row['desayunos_total'] ?? 0;
+                $comidas_total = $row['comidas_total'] ?? 0;
                 $total = $row['total_consumos'] ?? 0;
                 
+                // Calcular monto según periodo de precio
+                $monto_desayunos = ($desayunos_antes_2026 * $precio_desayuno_viejo) + ($desayunos_desde_2026 * $precio_desayuno_nuevo);
+                $monto_comidas = ($comidas_antes_2026 * $precio_comida_viejo) + ($comidas_desde_2026 * $precio_comida_nuevo);
+                $monto_total = $monto_desayunos + $monto_comidas;
+                
                 $desglose_exentos[$persona] = array(
-                    'desayunos' => $desayunos,
-                    'comidas' => $comidas,
+                    'desayunos_antes_2026' => $desayunos_antes_2026,
+                    'desayunos_desde_2026' => $desayunos_desde_2026,
+                    'comidas_antes_2026' => $comidas_antes_2026,
+                    'comidas_desde_2026' => $comidas_desde_2026,
+                    'desayunos_total' => $desayunos_total,
+                    'comidas_total' => $comidas_total,
                     'total' => $total,
-                    'monto' => $total * 30
+                    'monto' => $monto_total
                 );
             }
         }
         
-        // CONSULTA MEJORADA: Desayunos y comidas servidos SEPARANDO EXENTOS
+        // CONSULTA MEJORADA: Desayunos y comidas servidos SEPARANDO EXENTOS Y POR PERIODO DE PRECIO
         $sql_comidas = "SELECT 
                         -- Total servidos (incluyendo exentos para calcular diferencia)
                         COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' THEN 1 END) AS Desayuno_Total,
                         COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' THEN 1 END) AS Comida_Total,
                         -- Exentos servidos
                         COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' AND $exentos_sql_condition THEN 1 END) AS ExentosDesayuno,
-                        COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' AND $exentos_sql_condition THEN 1 END) AS ExentosComida
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' AND $exentos_sql_condition THEN 1 END) AS ExentosComida,
+                        -- Pagantes antes del 2026-01-01
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' AND NOT $exentos_sql_condition AND convert(date, Hora_Entrada, 103) < '2026-01-01' THEN 1 END) AS PagantesDesayunoAntes2026,
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' AND NOT $exentos_sql_condition AND convert(date, Hora_Entrada, 103) < '2026-01-01' THEN 1 END) AS PagantesComidaAntes2026,
+                        -- Pagantes desde el 2026-01-01
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' AND NOT $exentos_sql_condition AND convert(date, Hora_Entrada, 103) >= '2026-01-01' THEN 1 END) AS PagantesDesayunoDesde2026,
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' AND NOT $exentos_sql_condition AND convert(date, Hora_Entrada, 103) >= '2026-01-01' THEN 1 END) AS PagantesComidaDesde2026,
+                        -- Exentos antes del 2026-01-01
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' AND $exentos_sql_condition AND convert(date, Hora_Entrada, 103) < '2026-01-01' THEN 1 END) AS ExentosDesayunoAntes2026,
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' AND $exentos_sql_condition AND convert(date, Hora_Entrada, 103) < '2026-01-01' THEN 1 END) AS ExentosComidaAntes2026,
+                        -- Exentos desde el 2026-01-01
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) < '12:00:00' AND $exentos_sql_condition AND convert(date, Hora_Entrada, 103) >= '2026-01-01' THEN 1 END) AS ExentosDesayunoDesde2026,
+                        COUNT(CASE WHEN CAST(Fecha AS TIME) >= '12:00:00' AND $exentos_sql_condition AND convert(date, Hora_Entrada, 103) >= '2026-01-01' THEN 1 END) AS ExentosComidaDesde2026
                        FROM Entradas
                        WHERE not nombre='.' and not nombre='' and not nombre LIKE '[0-9]%'
                        AND convert(date, Hora_Entrada, 103) BETWEEN ? AND ?";
@@ -290,6 +373,18 @@ try {
                 $total_comidas_con_exentos = $row['Comida_Total'] ?? 0;
                 $exentos_desayuno_servidos = $row['ExentosDesayuno'] ?? 0;
                 $exentos_comida_servidos = $row['ExentosComida'] ?? 0;
+                
+                // Obtener datos detallados por periodo de precio para pagantes
+                $pagantes_desayunos_antes_2026 = $row['PagantesDesayunoAntes2026'] ?? 0;
+                $pagantes_desayunos_desde_2026 = $row['PagantesDesayunoDesde2026'] ?? 0;
+                $pagantes_comidas_antes_2026 = $row['PagantesComidaAntes2026'] ?? 0;
+                $pagantes_comidas_desde_2026 = $row['PagantesComidaDesde2026'] ?? 0;
+                
+                // Obtener datos detallados por periodo de precio para exentos
+                $exentos_desayunos_antes_2026 = $row['ExentosDesayunoAntes2026'] ?? 0;
+                $exentos_desayunos_desde_2026 = $row['ExentosDesayunoDesde2026'] ?? 0;
+                $exentos_comidas_antes_2026 = $row['ExentosComidaAntes2026'] ?? 0;
+                $exentos_comidas_desde_2026 = $row['ExentosComidaDesde2026'] ?? 0;
                 
                 // Calcular pagantes (excluyendo exentos)
                 $desayunos_hoy = $total_desayunos_con_exentos - $exentos_desayuno_servidos;
@@ -373,7 +468,8 @@ try {
                                 COUNT(*) as TotalRegistros
                               FROM cancelaciones
                               WHERE convert(date, FECHA, 102) BETWEEN ? AND ?
-                              AND NOT $exentos_sql_condition";
+                              AND NOT $exentos_sql_condition
+                              AND ESTATUS = 'APROBADO'";
         
         $params_cancelaciones = array($fecha_inicio, $fecha_fin);
         $stmt_cancelaciones = sqlsrv_query($conn, $sql_cancelaciones, $params_cancelaciones);
@@ -387,9 +483,34 @@ try {
             }
         }
         
-        // Calcular montos CORRECTAMENTE (solo pagantes, excluyendo exentos)
-        $monto_recaudado = ($desayunos_hoy + $comidas_hoy) * 30;
-        $monto_exentos = $exentos_total_servidos * 30;
+        // Calcular montos CORRECTAMENTE con precios diferenciados por fecha
+        $monto_desayunos_antes_2026 = $pagantes_desayunos_antes_2026 * $precio_desayuno_viejo;
+        $monto_desayunos_desde_2026 = $pagantes_desayunos_desde_2026 * $precio_desayuno_nuevo;
+        $monto_comidas_antes_2026 = $pagantes_comidas_antes_2026 * $precio_comida_viejo;
+        $monto_comidas_desde_2026 = $pagantes_comidas_desde_2026 * $precio_comida_nuevo;
+        
+        $monto_recaudado = $monto_desayunos_antes_2026 + $monto_desayunos_desde_2026 + 
+                          $monto_comidas_antes_2026 + $monto_comidas_desde_2026;
+        
+        // Calcular montos para exentos con precios diferenciados por fecha
+        $monto_exentos_desayunos_antes_2026 = $exentos_desayunos_antes_2026 * $precio_desayuno_viejo;
+        $monto_exentos_desayunos_desde_2026 = $exentos_desayunos_desde_2026 * $precio_desayuno_nuevo;
+        $monto_exentos_comidas_antes_2026 = $exentos_comidas_antes_2026 * $precio_comida_viejo;
+        $monto_exentos_comidas_desde_2026 = $exentos_comidas_desde_2026 * $precio_comida_nuevo;
+        
+        $monto_exentos = $monto_exentos_desayunos_antes_2026 + $monto_exentos_desayunos_desde_2026 + 
+                        $monto_exentos_comidas_antes_2026 + $monto_exentos_comidas_desde_2026;
+        
+        // Totales para estadísticas
+        $total_desayunos_antes_2026 = $pagantes_desayunos_antes_2026 + $exentos_desayunos_antes_2026;
+        $total_desayunos_desde_2026 = $pagantes_desayunos_desde_2026 + $exentos_desayunos_desde_2026;
+        $total_comidas_antes_2026 = $pagantes_comidas_antes_2026 + $exentos_comidas_antes_2026;
+        $total_comidas_desde_2026 = $pagantes_comidas_desde_2026 + $exentos_comidas_desde_2026;
+        
+        $total_exentos_desayunos_antes_2026 = $exentos_desayunos_antes_2026;
+        $total_exentos_desayunos_desde_2026 = $exentos_desayunos_desde_2026;
+        $total_exentos_comidas_antes_2026 = $exentos_comidas_antes_2026;
+        $total_exentos_comidas_desde_2026 = $exentos_comidas_desde_2026;
         
         // Cerrar conexión principal
         sqlsrv_close($conn);
@@ -413,26 +534,44 @@ try {
     $exentos_total_servidos = 16;
     $exentos_total_agendados = 16;
     
+    // Para precios diferenciados (asumiendo mitad antes y mitad después)
+    $monto_desayunos_antes_2026 = 56 * $precio_desayuno_viejo;
+    $monto_desayunos_desde_2026 = 56 * $precio_desayuno_nuevo;
+    $monto_comidas_antes_2026 = 107 * $precio_comida_viejo;
+    $monto_comidas_desde_2026 = 107 * $precio_comida_nuevo;
+    
+    $monto_recaudado = $monto_desayunos_antes_2026 + $monto_desayunos_desde_2026 + 
+                      $monto_comidas_antes_2026 + $monto_comidas_desde_2026;
+    
+    $monto_exentos_desayunos_antes_2026 = 4 * $precio_desayuno_viejo;
+    $monto_exentos_desayunos_desde_2026 = 4 * $precio_desayuno_nuevo;
+    $monto_exentos_comidas_antes_2026 = 4 * $precio_comida_viejo;
+    $monto_exentos_comidas_desde_2026 = 4 * $precio_comida_nuevo;
+    
+    $monto_exentos = $monto_exentos_desayunos_antes_2026 + $monto_exentos_desayunos_desde_2026 + 
+                    $monto_exentos_comidas_antes_2026 + $monto_exentos_comidas_desde_2026;
+    
     // Datos de ejemplo para desglose de exentos
     $desglose_exentos = array(
-        'ALEJANDRA CRUZ' => array('desayunos' => 12, 'comidas' => 15, 'total' => 27, 'monto' => 810),
-        'ALTA DIRECCION' => array('desayunos' => 10, 'comidas' => 18, 'total' => 28, 'monto' => 840),
-        'CRUZ JOSE LUIS' => array('desayunos' => 8, 'comidas' => 12, 'total' => 20, 'monto' => 600),
-        'CRUZ RODRIGUEZ ALEJANDRO' => array('desayunos' => 9, 'comidas' => 14, 'total' => 23, 'monto' => 690),
-        'JURIDICO' => array('desayunos' => 11, 'comidas' => 16, 'total' => 27, 'monto' => 810),
-        'PALMA TREJO SANDY MARK' => array('desayunos' => 7, 'comidas' => 10, 'total' => 17, 'monto' => 510),
-        'REYES QUIROZ HILDA' => array('desayunos' => 8, 'comidas' => 13, 'total' => 21, 'monto' => 630),
-        'VIGILANCIA' => array('desayunos' => 6, 'comidas' => 9, 'total' => 15, 'monto' => 450)
+        'ALEJANDRA CRUZ' => array(
+            'desayunos_antes_2026' => 6, 'desayunos_desde_2026' => 6, 'desayunos_total' => 12,
+            'comidas_antes_2026' => 7, 'comidas_desde_2026' => 8, 'comidas_total' => 15,
+            'total' => 27, 'monto' => (6*30)+(6*35)+(7*30)+(8*45)
+        ),
+        'ALTA DIRECCION' => array(
+            'desayunos_antes_2026' => 5, 'desayunos_desde_2026' => 5, 'desayunos_total' => 10,
+            'comidas_antes_2026' => 9, 'comidas_desde_2026' => 9, 'comidas_total' => 18,
+            'total' => 28, 'monto' => (5*30)+(5*35)+(9*30)+(9*45)
+        ),
+        // ... similar para otras personas exentas
     );
     
     $tasa_asistencia = 78.5;
-    $monto_recaudado = 10260; // (112+214)*30
-    $monto_exentos = 480; // 16*30
     
     // Valores por defecto para cancelaciones
-    $cancelaciones_desayuno = 18;
-    $cancelaciones_comida = 32;
-    $total_cancelaciones = 43;
+    $cancelaciones_desayuno = 0;
+    $cancelaciones_comida = 0;
+    $total_cancelaciones = 0;
     
     // Valor por defecto para gastos Contpaq i
     $total_gastos_alquimista = 120000;
@@ -520,7 +659,7 @@ try {
         WHERE (ALQUIMISTA2024.[dbo].docDocument.ModuleID IN (183, 1246, 1253, 242, 1246, 1249))
             AND docDocument.Deletedon IS NULL 
             AND docDocument.Cancelledon IS NULL
-            AND YEAR(ALQUIMISTA2024.[dbo].docDocument.DateDocument) = YEAR(GETDATE())
+            AND YEAR(ALQUIMISTA2024.[dbo].docDocument.DateDocument) IN ('2025','2026')
     ) as GastosFiltrados
     WHERE CC IN (
         '999-017 Mantto. Edificio',
@@ -602,7 +741,7 @@ try {
         WHERE (BASENUEVA.[dbo].docDocument.ModuleID IN (183, 1246, 1253, 242, 1246, 1249))
             AND docDocument.Deletedon IS NULL 
             AND docDocument.Cancelledon IS NULL
-            AND YEAR(BASENUEVA.[dbo].docDocument.DateDocument) = YEAR(GETDATE())
+            AND YEAR(BASENUEVA.[dbo].docDocument.DateDocument) in ('2025','2026')
     ) as GastosFiltrados
     WHERE CC IN (
         '999-016 General Comedor'
@@ -656,10 +795,6 @@ try {
     $total_registros_contpaq = 45;
 }
 
-// Obtener información del usuario desde la sesión
-$user_name = $_SESSION['user_name'] ?? 'Administrador';
-$user_area = $_SESSION['user_area'] ?? 'Sistema de Comedor';
-
 // Calcular porcentajes para las cards (EXCLUYENDO EXENTOS)
 $porcentaje_desayunos = $desayunos_agendados > 0 ? round(($desayunos_hoy / $desayunos_agendados) * 100, 1) : 0;
 $porcentaje_comidas = $comidas_agendadas > 0 ? round(($comidas_hoy / $comidas_agendadas) * 100, 1) : 0;
@@ -686,17 +821,26 @@ $total_comidas_exentas = 0;
 $total_monto_exentos = 0;
 
 foreach ($desglose_exentos as $persona => $datos) {
-    $total_desayunos_exentos += $datos['desayunos'];
-    $total_comidas_exentas += $datos['comidas'];
+    $total_desayunos_exentos += $datos['desayunos_total'];
+    $total_comidas_exentas += $datos['comidas_total'];
     $total_monto_exentos += $datos['monto'];
 }
+
+// Determinar si el periodo incluye ambos regímenes de precios
+$periodo_inicio = strtotime($fecha_inicio);
+$periodo_fin = strtotime($fecha_fin);
+$fecha_cambio = strtotime($fecha_cambio_precios);
+
+$incluye_viejo_precio = ($periodo_inicio < $fecha_cambio);
+$incluye_nuevo_precio = ($periodo_fin >= $fecha_cambio);
+$periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portal de Comedor - Administración Completa</title>
+    <title>Portal de Comedor - Administración <?php echo !$acceso_completo ? '(Acceso Restringido)' : 'Completa'; ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -803,6 +947,40 @@ foreach ($desglose_exentos as $persona => $datos) {
             font-size: 18px;
             width: 24px;
             text-align: center;
+        }
+        
+        /* Estilo para enlaces deshabilitados */
+        .sidebar .nav-link.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        
+        .sidebar .nav-link.disabled:hover {
+            transform: none;
+            background: none;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Badge para acceso restringido */
+        .restricted-badge {
+            background-color: var(--danger-color);
+            color: white;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 5px;
+            vertical-align: middle;
+        }
+        
+        .access-info {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.1));
+            border-left: 4px solid var(--warning-color);
+            border-radius: 0 8px 8px 0;
+            padding: 12px 15px;
+            margin: 10px 0;
+            color: var(--dark-gray);
+            font-size: 0.9rem;
         }
         
         .main-content {
@@ -1921,6 +2099,62 @@ foreach ($desglose_exentos as $persona => $datos) {
             font-weight: 500;
         }
         
+        /* Nuevos estilos para información de precios diferenciados */
+        .price-info-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--info-color), var(--accent-blue));
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+        
+        .price-breakdown {
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+            border-left: 4px solid var(--info-color);
+        }
+        
+        .price-breakdown-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        
+        .price-breakdown-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .price-period {
+            font-weight: 500;
+            color: var(--dark-gray);
+        }
+        
+        .price-amount {
+            font-weight: 600;
+            color: var(--info-color);
+        }
+        
+        .price-subtext {
+            font-size: 0.85rem;
+            color: var(--medium-gray);
+            margin-top: 3px;
+        }
+        
+        .price-change-notice {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05));
+            border-left: 4px solid var(--warning-color);
+            padding: 12px 15px;
+            border-radius: 0 8px 8px 0;
+            margin: 15px 0;
+        }
+        
         @media (max-width: 992px) {
             .sidebar {
                 width: 250px;
@@ -2101,51 +2335,105 @@ foreach ($desglose_exentos as $persona => $datos) {
     <div class="sidebar" id="sidebar">
         <div class="user-profile">
             <div class="user-avatar">
-                <span>AD</span>
+                <span><?php echo substr($user_name, 0, 2); ?></span>
             </div>
             <div class="user-info">
                 <h5><?php echo htmlspecialchars($user_name); ?></h5>
                 <p><?php echo htmlspecialchars($user_area); ?></p>
+                <?php if (!$acceso_completo): ?>
+                <small class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Acceso Restringido</small>
+                <?php endif; ?>
             </div>
         </div>
         
         <ul class="nav flex-column px-3">
+            <?php if ($acceso_completo): ?>
+                <!-- Dashboard solo para usuarios con acceso completo -->
+                <li class="nav-item">
+                    <a class="nav-link <?php echo (!isset($_GET['section']) || $_GET['section'] == 'dashboard') ? 'active' : ''; ?>" href="#" data-section="dashboard">
+                        <i class="fas fa-chart-pie"></i> Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?php echo (isset($_GET['section']) && $_GET['section'] == 'usuarios') ? 'active' : ''; ?>" href="#" data-section="usuarios">
+                        <i class="fas fa-user-cog"></i> Gestión de Usuarios
+                    </a>
+                </li>
+            <?php endif; ?>
+            
+            <!-- Reportes siempre disponible -->
             <li class="nav-item">
-                <a class="nav-link active" href="#" data-section="dashboard">
-                    <i class="fas fa-chart-pie"></i> Dashboard
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="#" data-section="usuarios">
-                    <i class="fas fa-user-cog"></i> Gestión de Usuarios
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="#" data-section="reportes">
+                <a class="nav-link <?php echo (isset($_GET['section']) && $_GET['section'] == 'reportes') ? 'active' : ''; ?>" href="#" data-section="reportes">
                     <i class="fas fa-chart-bar"></i> Generación de Reportes
+                    <?php if (!$acceso_completo): ?>
+                    <span class="restricted-badge">Acceso Permitido</span>
+                    <?php endif; ?>
                 </a>
             </li>
-            <li class="nav-item">
-                <a class="nav-link" href="#" data-section="menus">
-                    <i class="fas fa-clipboard-list"></i> Gestión de Menús
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="#" data-section="inventario">
-                    <i class="fas fa-clipboard-check"></i> Inventario de Utensilios
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="#" data-section="cancelaciones">
-                    <i class="fas fa-times-circle"></i> Validar Cancelaciones
-                </a>
-            </li>
+            
+            <?php if ($acceso_completo): ?>
+                <!-- Menus solo para usuarios con acceso completo -->
+                <li class="nav-item">
+                    <a class="nav-link <?php echo (isset($_GET['section']) && $_GET['section'] == 'menus') ? 'active' : ''; ?>" href="#" data-section="menus">
+                        <i class="fas fa-clipboard-list"></i> Gestión de Menús
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?php echo (isset($_GET['section']) && $_GET['section'] == 'inventario') ? 'active' : ''; ?>" href="#" data-section="inventario">
+                        <i class="fas fa-clipboard-check"></i> Inventario de Utensilios
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?php echo (isset($_GET['section']) && $_GET['section'] == 'cancelaciones') ? 'active' : ''; ?>" href="#" data-section="cancelaciones">
+                        <i class="fas fa-times-circle"></i> Validar Cancelaciones
+                    </a>
+                </li>
+            <?php else: ?>
+                <!-- Mostrar opciones deshabilitadas para usuarios restringidos -->
+                <li class="nav-item">
+                    <a class="nav-link disabled" href="#">
+                        <i class="fas fa-chart-pie"></i> Dashboard
+                        <span class="restricted-badge">Restringido</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link disabled" href="#">
+                        <i class="fas fa-user-cog"></i> Gestión de Usuarios
+                        <span class="restricted-badge">Restringido</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link disabled" href="#">
+                        <i class="fas fa-clipboard-list"></i> Gestión de Menús
+                        <span class="restricted-badge">Restringido</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link disabled" href="#">
+                        <i class="fas fa-clipboard-check"></i> Inventario de Utensilios
+                        <span class="restricted-badge">Restringido</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link disabled" href="#">
+                        <i class="fas fa-times-circle"></i> Validar Cancelaciones
+                        <span class="restricted-badge">Restringido</span>
+                    </a>
+                </li>
+            <?php endif; ?>
+            
             <li class="nav-item mt-auto">
                 <a class="nav-link text-danger" href="http://desarollo-bacros/Comedor/admicome4.php?logout=true" id="logoutBtn">
                     <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
                 </a>
             </li>
         </ul>
+        
+        <?php if (!$acceso_completo): ?>
+        <div class="access-info m-3">
+            <small><i class="fas fa-info-circle me-2"></i><strong>Acceso Restringido:</strong> Su usuario solo tiene permisos para generar reportes.</small>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- Botón de menú móvil -->
@@ -2162,23 +2450,33 @@ foreach ($desglose_exentos as $persona => $datos) {
                     <i class="fas fa-bars"></i>
                 </button>
                 
-                <h1 class="header-title">Portal de Comedor - Administración Completa</h1>
+                <h1 class="header-title">
+                    Portal de Comedor - Administración <?php echo !$acceso_completo ? '(Acceso Restringido)' : 'Completa'; ?>
+                    <?php if (!$acceso_completo): ?>
+                    <span class="badge bg-warning ms-2">Solo Reportes</span>
+                    <?php endif; ?>
+                </h1>
             </div>
             
             <div class="user-display">
                 <div class="user-info-header">
                     <div class="user-name-display"><?php echo htmlspecialchars($user_name); ?></div>
                     <div class="user-area-display"><?php echo htmlspecialchars($user_area); ?></div>
+                    <?php if (!$acceso_completo): ?>
+                    <div class="badge bg-warning ms-2">Acceso Restringido</div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
 
-        <!-- Dashboard Section -->
-        <div id="dashboard" class="section active">
+        <?php if ($acceso_completo): ?>
+        <!-- Dashboard Section - SOLO PARA USUARIOS CON ACCESO COMPLETO -->
+        <div id="dashboard" class="section <?php echo (!isset($_GET['section']) || $_GET['section'] == 'dashboard') ? 'active' : 'd-none'; ?>">
             
             <!-- FILTROS DE FECHA -->
             <div class="filters-container">
                 <form id="dateFilterForm" method="GET">
+                    <input type="hidden" name="section" value="dashboard">
                     <div class="filter-group">
                         <div class="filter-item">
                             <div class="filter-label">Rango de Fechas:</div>
@@ -2212,6 +2510,23 @@ foreach ($desglose_exentos as $persona => $datos) {
                             <?php echo $dias_periodo; ?> día<?php echo $dias_periodo > 1 ? 's' : ''; ?>
                         </span>
                     </div>
+                    
+                    <!-- NOTIFICACIÓN DE PRECIOS DIFERENCIADOS -->
+                    <?php if ($periodo_mixto_precios): ?>
+                    <div class="price-change-notice mt-3">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-exclamation-triangle text-warning me-3 fa-lg"></i>
+                            <div>
+                                <strong class="text-warning">Aviso de Precios Diferenciados:</strong>
+                                <p class="mb-0">
+                                    Este periodo incluye registros con dos regímenes de precios:
+                                    <strong>Antes del 2026-01-01</strong> ($30 c/u) y 
+                                    <strong>Desde el 2026-01-01</strong> (Desayuno: $35, Comida: $45)
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </form>
             </div>
             
@@ -2227,7 +2542,11 @@ foreach ($desglose_exentos as $persona => $datos) {
                     <div class="comparison-icon desayunos">
                         <i class="fas fa-coffee"></i>
                     </div>
-                    <h4 class="mb-3">Desayunos</h4>
+                    <h4 class="mb-3">Desayunos
+                        <?php if ($periodo_mixto_precios): ?>
+                        <span class="price-info-badge">Precios Mixtos</span>
+                        <?php endif; ?>
+                    </h4>
                     
                     <div class="comparison-stats">
                         <div class="stat-item">
@@ -2239,6 +2558,24 @@ foreach ($desglose_exentos as $persona => $datos) {
                             <div class="stat-label">Agendados</div>
                         </div>
                     </div>
+                    
+                    <!-- DESGLOSE DE PRECIOS PARA DESAYUNOS -->
+                    <?php if ($periodo_mixto_precios): ?>
+                    <div class="price-breakdown">
+                        <div class="price-breakdown-item">
+                            <span class="price-period">Antes 2026:</span>
+                            <span class="price-amount">$<?php echo number_format($monto_desayunos_antes_2026, 2, '.', ','); ?></span>
+                        </div>
+                        <div class="price-breakdown-item">
+                            <span class="price-period">Desde 2026:</span>
+                            <span class="price-amount">$<?php echo number_format($monto_desayunos_desde_2026, 2, '.', ','); ?></span>
+                        </div>
+                        <div class="price-subtext">
+                            <?php echo $pagantes_desayunos_antes_2026; ?> x $<?php echo $precio_desayuno_viejo; ?> + 
+                            <?php echo $pagantes_desayunos_desde_2026; ?> x $<?php echo $precio_desayuno_nuevo; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                     
                     <div class="comparison-percentage">
                         <?php echo $porcentaje_desayunos; ?>% de cumplimiento
@@ -2264,7 +2601,11 @@ foreach ($desglose_exentos as $persona => $datos) {
                     <div class="comparison-icon comidas">
                         <i class="fas fa-utensils"></i>
                     </div>
-                    <h4 class="mb-3">Comidas</h4>
+                    <h4 class="mb-3">Comidas
+                        <?php if ($periodo_mixto_precios): ?>
+                        <span class="price-info-badge">Precios Mixtos</span>
+                        <?php endif; ?>
+                    </h4>
                     
                     <div class="comparison-stats">
                         <div class="stat-item">
@@ -2276,6 +2617,24 @@ foreach ($desglose_exentos as $persona => $datos) {
                             <div class="stat-label">Agendadas</div>
                         </div>
                     </div>
+                    
+                    <!-- DESGLOSE DE PRECIOS PARA COMIDAS -->
+                    <?php if ($periodo_mixto_precios): ?>
+                    <div class="price-breakdown">
+                        <div class="price-breakdown-item">
+                            <span class="price-period">Antes 2026:</span>
+                            <span class="price-amount">$<?php echo number_format($monto_comidas_antes_2026, 2, '.', ','); ?></span>
+                        </div>
+                        <div class="price-breakdown-item">
+                            <span class="price-period">Desde 2026:</span>
+                            <span class="price-amount">$<?php echo number_format($monto_comidas_desde_2026, 2, '.', ','); ?></span>
+                        </div>
+                        <div class="price-subtext">
+                            <?php echo $pagantes_comidas_antes_2026; ?> x $<?php echo $precio_comida_viejo; ?> + 
+                            <?php echo $pagantes_comidas_desde_2026; ?> x $<?php echo $precio_comida_nuevo; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                     
                     <div class="comparison-percentage">
                         <?php echo $porcentaje_comidas; ?>% de cumplimiento
@@ -2301,7 +2660,11 @@ foreach ($desglose_exentos as $persona => $datos) {
                     <div class="comparison-icon exentos">
                         <i class="fas fa-user-slash"></i>
                     </div>
-                    <h4 class="mb-3">Personas Exentas</h4>
+                    <h4 class="mb-3">Personas Exentas
+                        <?php if ($periodo_mixto_precios): ?>
+                        <span class="price-info-badge">Precios Mixtos</span>
+                        <?php endif; ?>
+                    </h4>
                     
                     <div class="comparison-stats">
                         <div class="stat-item">
@@ -2313,6 +2676,28 @@ foreach ($desglose_exentos as $persona => $datos) {
                             <div class="stat-label">Comidas</div>
                         </div>
                     </div>
+                    
+                    <!-- DESGLOSE DE PRECIOS PARA EXENTOS -->
+                    <?php if ($periodo_mixto_precios): ?>
+                    <div class="price-breakdown">
+                        <div class="price-breakdown-item">
+                            <span class="price-period">Desay. Antes 2026:</span>
+                            <span class="price-amount">$<?php echo number_format($monto_exentos_desayunos_antes_2026, 2, '.', ','); ?></span>
+                        </div>
+                        <div class="price-breakdown-item">
+                            <span class="price-period">Desay. Desde 2026:</span>
+                            <span class="price-amount">$<?php echo number_format($monto_exentos_desayunos_desde_2026, 2, '.', ','); ?></span>
+                        </div>
+                        <div class="price-breakdown-item">
+                            <span class="price-period">Com. Antes 2026:</span>
+                            <span class="price-amount">$<?php echo number_format($monto_exentos_comidas_antes_2026, 2, '.', ','); ?></span>
+                        </div>
+                        <div class="price-breakdown-item">
+                            <span class="price-period">Com. Desde 2026:</span>
+                            <span class="price-amount">$<?php echo number_format($monto_exentos_comidas_desde_2026, 2, '.', ','); ?></span>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                     
                     <div class="exentos-total">
                         Total: <?php echo $exentos_total_servidos; ?> comidas
@@ -2364,7 +2749,7 @@ foreach ($desglose_exentos as $persona => $datos) {
                         if ($total_cancelaciones > 0) {
                             echo round($porcentaje_cancelaciones, 1) . '% del total agendado';
                         } else {
-                            echo 'Sin cancelaciones';
+                            echo 'Sin cancelaciones aprobadas';
                         }
                         ?>
                     </small>
@@ -2433,7 +2818,11 @@ foreach ($desglose_exentos as $persona => $datos) {
                     <div class="comparison-icon utilidad">
                         <i class="fas fa-chart-line"></i>
                     </div>
-                    <h4 class="mb-3">Utilidad</h4>
+                    <h4 class="mb-3">Utilidad
+                        <?php if ($periodo_mixto_precios): ?>
+                        <span class="price-info-badge">Precios Mixtos</span>
+                        <?php endif; ?>
+                    </h4>
                     
                     <div class="comparison-stats">
                         <div class="stat-item">
@@ -2544,14 +2933,19 @@ foreach ($desglose_exentos as $persona => $datos) {
                     <div class="feature-icon revenue mx-auto">
                         <i class="fas fa-money-bill-wave"></i>
                     </div>
-                   <div class="stat-number" id="monto-recaudado">$<?php echo number_format($monto_recaudado, 0, '', ','); ?></div>
+                    <div class="stat-number" id="monto-recaudado">
+                        $<?php echo number_format($monto_recaudado, 0, '', ','); ?>
+                        <?php if ($periodo_mixto_precios): ?>
+                        <div class="price-subtext" style="font-size: 0.6rem; margin-top: 5px;">
+                            (Precios diferenciados por fecha)
+                        </div>
+                        <?php endif; ?>
+                    </div>
                     <div class="stat-label">Monto Recaudado</div>
                     <div class="progress">
                         <div class="progress-bar" role="progressbar" style="width: 65%; background-color: var(--indigo-color);"></div>
                     </div>
                 </div>
-              
-    
             </div>
 
             <!-- Sección de Finanzas Mejorada -->
@@ -2559,7 +2953,10 @@ foreach ($desglose_exentos as $persona => $datos) {
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header">
-                            <i class="fas fa-chart-pie me-2"></i>Resumen Financiero del Periodo (Pagantes vs Exentos)
+                            <i class="fas fa-chart-pie me-2"></i>Resumen Financiero del Periodo
+                            <?php if ($periodo_mixto_precios): ?>
+                            <span class="badge bg-warning ms-2">Precios Diferenciados por Fecha</span>
+                            <?php endif; ?>
                         </div>
                         <div class="card-body">
                             <div class="finances-container">
@@ -2568,6 +2965,9 @@ foreach ($desglose_exentos as $persona => $datos) {
                                     <div class="finance-title">
                                         <i class="fas fa-money-bill-wave text-success"></i>
                                         Ingresos por Comedor 
+                                        <?php if ($periodo_mixto_precios): ?>
+                                        <span class="badge bg-info">Precios Mixtos</span>
+                                        <?php endif; ?>
                                     </div>
                                     <div class="finance-amount ingresos">
                                         $<?php echo number_format($monto_recaudado, 2, '.', ','); ?>
@@ -2575,23 +2975,59 @@ foreach ($desglose_exentos as $persona => $datos) {
                                     <div class="finance-subtitle">
                                         Del <?php echo date('d/m/Y', strtotime($fecha_inicio)); ?> al <?php echo date('d/m/Y', strtotime($fecha_fin)); ?>
                                     </div>
+                                    
+                                    <!-- DESGLOSE DETALLADO POR PERIODO DE PRECIO -->
                                     <div class="finance-breakdown">
+                                        <?php if ($periodo_mixto_precios): ?>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Período Antes 2026-01-01:</span>
+                                            <span class="breakdown-value">$<?php echo number_format($monto_desayunos_antes_2026 + $monto_comidas_antes_2026, 2, '.', ','); ?></span>
+                                        </div>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Período Desde 2026-01-01:</span>
+                                            <span class="breakdown-value">$<?php echo number_format($monto_desayunos_desde_2026 + $monto_comidas_desde_2026, 2, '.', ','); ?></span>
+                                        </div>
+                                        <div class="breakdown-item" style="border-top: 1px dashed var(--light-gray); padding-top: 12px;">
+                                            <span class="breakdown-label">Desayunos Antes 2026:</span>
+                                            <span class="breakdown-value"><?php echo $pagantes_desayunos_antes_2026; ?> x $<?php echo $precio_desayuno_viejo; ?></span>
+                                        </div>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Desayunos Desde 2026:</span>
+                                            <span class="breakdown-value"><?php echo $pagantes_desayunos_desde_2026; ?> x $<?php echo $precio_desayuno_nuevo; ?></span>
+                                        </div>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Comidas Antes 2026:</span>
+                                            <span class="breakdown-value"><?php echo $pagantes_comidas_antes_2026; ?> x $<?php echo $precio_comida_viejo; ?></span>
+                                        </div>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Comidas Desde 2026:</span>
+                                            <span class="breakdown-value"><?php echo $pagantes_comidas_desde_2026; ?> x $<?php echo $precio_comida_nuevo; ?></span>
+                                        </div>
+                                        <?php else: ?>
                                         <div class="breakdown-item">
                                             <span class="breakdown-label">Desayunos (<?php echo $desayunos_hoy; ?>)</span>
-                                            <span class="breakdown-value">$<?php echo number_format($desayunos_hoy * 30, 2, '.', ','); ?></span>
+                                            <span class="breakdown-value">$<?php echo number_format($desayunos_hoy * $precio_desayuno_viejo, 2, '.', ','); ?></span>
                                         </div>
                                         <div class="breakdown-item">
                                             <span class="breakdown-label">Comidas (<?php echo $comidas_hoy; ?>)</span>
-                                            <span class="breakdown-value">$<?php echo number_format($comidas_hoy * 30, 2, '.', ','); ?></span>
+                                            <span class="breakdown-value">$<?php echo number_format($comidas_hoy * $precio_comida_viejo, 2, '.', ','); ?></span>
                                         </div>
-                                        <div class="breakdown-item">
+                                        <?php endif; ?>
+                                        <div class="breakdown-item" style="border-top: 1px solid var(--light-gray); padding-top: 12px;">
                                             <span class="breakdown-label">Total Servidos</span>
                                             <span class="breakdown-value"><?php echo ($desayunos_hoy + $comidas_hoy); ?> comidas</span>
                                         </div>
                                     </div>
+                                    
                                     <div class="finance-trend">
                                         <i class="fas fa-arrow-up trend-up"></i>
-                                        <span class="trend-up">Precio unitario: $30.00</span>
+                                        <span class="trend-up">
+                                            <?php if ($periodo_mixto_precios): ?>
+                                            Precios diferenciados según fecha
+                                            <?php else: ?>
+                                            Precio unitario: $<?php echo $precio_desayuno_viejo; ?>
+                                            <?php endif; ?>
+                                        </span>
                                     </div>
                                 </div>
                                 
@@ -2600,6 +3036,9 @@ foreach ($desglose_exentos as $persona => $datos) {
                                     <div class="finance-title">
                                         <i class="fas fa-user-slash text-purple"></i>
                                         Comidas Exentas (No Cobradas)
+                                        <?php if ($periodo_mixto_precios): ?>
+                                        <span class="badge bg-info">Precios Mixtos</span>
+                                        <?php endif; ?>
                                     </div>
                                     <div class="finance-amount exentos">
                                         $<?php echo number_format($monto_exentos, 2, '.', ','); ?>
@@ -2607,7 +3046,31 @@ foreach ($desglose_exentos as $persona => $datos) {
                                     <div class="finance-subtitle">
                                         Del <?php echo date('d/m/Y', strtotime($fecha_inicio)); ?> al <?php echo date('d/m/Y', strtotime($fecha_fin)); ?>
                                     </div>
+                                    
+                                    <!-- DESGLOSE DE EXENTOS POR PERIODO DE PRECIO -->
                                     <div class="finance-breakdown">
+                                        <?php if ($periodo_mixto_precios): ?>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Desayunos Antes 2026</span>
+                                            <span class="breakdown-value"><?php echo $total_exentos_desayunos_antes_2026; ?> x $<?php echo $precio_desayuno_viejo; ?></span>
+                                        </div>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Desayunos Desde 2026</span>
+                                            <span class="breakdown-value"><?php echo $total_exentos_desayunos_desde_2026; ?> x $<?php echo $precio_desayuno_nuevo; ?></span>
+                                        </div>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Comidas Antes 2026</span>
+                                            <span class="breakdown-value"><?php echo $total_exentos_comidas_antes_2026; ?> x $<?php echo $precio_comida_viejo; ?></span>
+                                        </div>
+                                        <div class="breakdown-item">
+                                            <span class="breakdown-label">Comidas Desde 2026</span>
+                                            <span class="breakdown-value"><?php echo $total_exentos_comidas_desde_2026; ?> x $<?php echo $precio_comida_nuevo; ?></span>
+                                        </div>
+                                        <div class="breakdown-item" style="border-top: 1px solid var(--light-gray); padding-top: 12px;">
+                                            <span class="breakdown-label">Total Exentos</span>
+                                            <span class="breakdown-value"><?php echo $exentos_total_servidos; ?> comidas</span>
+                                        </div>
+                                        <?php else: ?>
                                         <div class="breakdown-item">
                                             <span class="breakdown-label">Desayunos Exentos</span>
                                             <span class="breakdown-value"><?php echo $exentos_desayuno_servidos; ?> comidas</span>
@@ -2616,10 +3079,11 @@ foreach ($desglose_exentos as $persona => $datos) {
                                             <span class="breakdown-label">Comidas Exentas</span>
                                             <span class="breakdown-value"><?php echo $exentos_comida_servidos; ?> comidas</span>
                                         </div>
-                                        <div class="breakdown-item">
+                                        <div class="breakdown-item" style="border-top: 1px solid var(--light-gray); padding-top: 12px;">
                                             <span class="breakdown-label">Total Exentos</span>
                                             <span class="breakdown-value"><?php echo $exentos_total_servidos; ?> comidas</span>
                                         </div>
+                                        <?php endif; ?>
                                     </div>
                                     
                                     <!-- DESGLOSE DETALLADO POR PERSONA EXENTA -->
@@ -2662,15 +3126,15 @@ foreach ($desglose_exentos as $persona => $datos) {
                                                         ?>
                                                         <?php foreach ($desglose_exentos as $persona => $datos): ?>
                                                             <?php 
-                                                            $total_general_desayunos += $datos['desayunos'];
-                                                            $total_general_comidas += $datos['comidas'];
+                                                            $total_general_desayunos += $datos['desayunos_total'];
+                                                            $total_general_comidas += $datos['comidas_total'];
                                                             $total_general_consumos += $datos['total'];
                                                             $total_general_monto += $datos['monto'];
                                                             ?>
                                                             <tr>
                                                                 <td><?php echo htmlspecialchars($persona); ?></td>
-                                                                <td><?php echo $datos['desayunos']; ?></td>
-                                                                <td><?php echo $datos['comidas']; ?></td>
+                                                                <td><?php echo $datos['desayunos_total']; ?></td>
+                                                                <td><?php echo $datos['comidas_total']; ?></td>
                                                                 <td class="exento-total-cell"><?php echo $datos['total']; ?></td>
                                                                 <td class="exento-monto-cell">$<?php echo number_format($datos['monto'], 2, '.', ','); ?></td>
                                                             </tr>
@@ -2709,6 +3173,9 @@ foreach ($desglose_exentos as $persona => $datos) {
                                     <div class="finance-title">
                                         <i class="fas fa-chart-line <?php echo $utilidad >= 0 ? 'text-success' : 'text-danger'; ?>"></i>
                                         Utilidad Neta 
+                                        <?php if ($periodo_mixto_precios): ?>
+                                        <span class="badge bg-info">Calculada con precios mixtos</span>
+                                        <?php endif; ?>
                                     </div>
                                     <div class="finance-amount <?php echo $utilidad >= 0 ? 'utilidad-positiva' : 'utilidad-negativa'; ?>">
                                         $<?php echo number_format($utilidad, 2, '.', ','); ?>
@@ -2750,6 +3217,9 @@ foreach ($desglose_exentos as $persona => $datos) {
                     <div class="card">
                         <div class="card-header">
                             <i class="fas fa-history me-2"></i>Resumen del Periodo
+                            <?php if ($periodo_mixto_precios): ?>
+                            <span class="badge bg-warning float-end">Precios Diferenciados</span>
+                            <?php endif; ?>
                         </div>
                         <div class="card-body">
                             <div class="chart-container">
@@ -2777,6 +3247,9 @@ foreach ($desglose_exentos as $persona => $datos) {
                     <div class="card">
                         <div class="card-header">
                             <i class="fas fa-chart-pie me-2"></i>Distribución por Tipo
+                            <?php if ($periodo_mixto_precios): ?>
+                            <span class="badge bg-info float-end">Precios por Fecha</span>
+                            <?php endif; ?>
                         </div>
                         <div class="card-body">
                             <div class="activity-item">
@@ -2786,6 +3259,12 @@ foreach ($desglose_exentos as $persona => $datos) {
                                 <div>
                                     <h6 class="mb-0">Desayunos</h6>
                                     <small class="text-muted"><?php echo $desayunos_hoy; ?> de <?php echo $desayunos_agendados; ?> agendados</small>
+                                    <?php if ($periodo_mixto_precios): ?>
+                                    <div class="price-subtext">
+                                        <?php echo $pagantes_desayunos_antes_2026; ?> x $<?php echo $precio_desayuno_viejo; ?> + 
+                                        <?php echo $pagantes_desayunos_desde_2026; ?> x $<?php echo $precio_desayuno_nuevo; ?>
+                                    </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="activity-item">
@@ -2795,6 +3274,12 @@ foreach ($desglose_exentos as $persona => $datos) {
                                 <div>
                                     <h6 class="mb-0">Comidas</h6>
                                     <small class="text-muted"><?php echo $comidas_hoy; ?> de <?php echo $comidas_agendadas; ?> agendadas</small>
+                                    <?php if ($periodo_mixto_precios): ?>
+                                    <div class="price-subtext">
+                                        <?php echo $pagantes_comidas_antes_2026; ?> x $<?php echo $precio_comida_viejo; ?> + 
+                                        <?php echo $pagantes_comidas_desde_2026; ?> x $<?php echo $precio_comida_nuevo; ?>
+                                    </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="activity-item">
@@ -2804,6 +3289,11 @@ foreach ($desglose_exentos as $persona => $datos) {
                                 <div>
                                     <h6 class="mb-0">Comidas Exentas</h6>
                                     <small class="text-muted"><?php echo $exentos_total_servidos; ?> comidas (<?php echo $exentos_desayuno_servidos; ?> desayunos, <?php echo $exentos_comida_servidos; ?> comidas)</small>
+                                    <?php if ($periodo_mixto_precios): ?>
+                                    <div class="price-subtext">
+                                        Monto no cobrado: $<?php echo number_format($monto_exentos, 2, '.', ','); ?>
+                                    </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="activity-item">
@@ -2821,7 +3311,7 @@ foreach ($desglose_exentos as $persona => $datos) {
                                 </div>
                                 <div>
                                     <h6 class="mb-0">Cancelaciones</h6>
-                                    <small class="text-muted"><?php echo $cancelaciones_desayuno; ?> desayunos, <?php echo $cancelaciones_comida; ?> comidas</small>
+                                    <small class="text-muted"><?php echo $cancelaciones_desayuno; ?> desayunos, <?php echo $cancelaciones_comida; ?> comidas (solo aprobadas)</small>
                                 </div>
                             </div>
                             <div class="activity-item">
@@ -2845,6 +3335,11 @@ foreach ($desglose_exentos as $persona => $datos) {
                                     <small class="text-muted <?php echo $utilidad >= 0 ? 'text-success' : 'text-danger'; ?>">
                                         $<?php echo number_format($utilidad, 2, '.', ','); ?> (<?php echo $monto_recaudado > 0 ? round(($utilidad / $monto_recaudado) * 100, 1) : 0; ?>%)
                                     </small>
+                                    <?php if ($periodo_mixto_precios): ?>
+                                    <div class="price-subtext">
+                                        Calculada con precios diferenciados
+                                    </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="activity-item">
@@ -2866,7 +3361,7 @@ foreach ($desglose_exentos as $persona => $datos) {
         </div>
 
         <!-- Sección de Gestión de Usuarios -->
-        <div id="usuarios" class="section d-none">
+        <div id="usuarios" class="section <?php echo (isset($_GET['section']) && $_GET['section'] == 'usuarios') ? 'active' : 'd-none'; ?>">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <div><i class="fas fa-user-cog me-2"></i>Sistema de Gestión de Usuarios</div>
@@ -2880,12 +3375,13 @@ foreach ($desglose_exentos as $persona => $datos) {
                 </div>
             </div>
         </div>
+        <?php endif; ?>
 
-        <!-- Sección de Reportes -->
-        <div id="reportes" class="section d-none">
+        <!-- Sección de Reportes - DISPONIBLE PARA TODOS -->
+        <div id="reportes" class="section <?php echo (isset($_GET['section']) && $_GET['section'] == 'reportes') ? 'active' : ($acceso_completo ? 'd-none' : 'active'); ?>">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <div><i class="fas fa-chart-bar me-2"></i>Sistema de Reportes</div>
+                    <div><i class="fas fa-chart-bar me-2"></i>Sistema de Reportes <?php echo !$acceso_completo ? '<span class="badge bg-success ms-2">Acceso Permitido</span>' : ''; ?></div>
                     <div><button class="btn btn-sm btn-primary" id="refresh-report-btn"><i class="fas fa-sync-alt me-1"></i>Actualizar</button></div>
                 </div>
                 <div class="card-body p-0 position-relative">
@@ -2897,8 +3393,9 @@ foreach ($desglose_exentos as $persona => $datos) {
             </div>
         </div>
 
+        <?php if ($acceso_completo): ?>
         <!-- Sección de Gestión de Menús -->
-        <div id="menus" class="section d-none">
+        <div id="menus" class="section <?php echo (isset($_GET['section']) && $_GET['section'] == 'menus') ? 'active' : 'd-none'; ?>">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <div><i class="fas fa-clipboard-list me-2"></i>Sistema de Gestión de Menús</div>
@@ -2914,7 +3411,7 @@ foreach ($desglose_exentos as $persona => $datos) {
         </div>
 
         <!-- NUEVA SECCIÓN - INVENTARIO DE UTENSILIOS Y EQUIPO DE COMEDOR -->
-        <div id="inventario" class="section d-none">
+        <div id="inventario" class="section <?php echo (isset($_GET['section']) && $_GET['section'] == 'inventario') ? 'active' : 'd-none'; ?>">
             <div class="card inventario-card">
                 <div class="card-header inventario-header d-flex justify-content-between align-items-center">
                     <div><i class="fas fa-clipboard-check me-2"></i>Inventario de Utensilios y Equipo de Comedor 2025</div>
@@ -3007,7 +3504,7 @@ foreach ($desglose_exentos as $persona => $datos) {
         </div>
 
         <!-- Sección de Cancelaciones -->
-        <div id="cancelaciones" class="section d-none">
+        <div id="cancelaciones" class="section <?php echo (isset($_GET['section']) && $_GET['section'] == 'cancelaciones') ? 'active' : 'd-none'; ?>">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <div><i class="fas fa-times-circle me-2"></i>Sistema de Validación de Cancelaciones</div>
@@ -3016,11 +3513,12 @@ foreach ($desglose_exentos as $persona => $datos) {
                 <div class="card-body p-0 position-relative">
                     <div id="cancelaciones-loading" class="loading-overlay"><div class="loading-spinner"></div><div class="loading-text">Cargando sistema de validación de cancelaciones...</div></div>
                     <div class="report-iframe-container">
-                        <iframe src="http://192.168.100.95/Comedor/ValidarFormatos.php?newpwd=Administrador" class="report-iframe" id="cancelaciones-iframe" onload="document.getElementById('cancelaciones-loading').style.display='none';"></iframe>
+                        <iframe src="http://192.168.100.95/Comedor/Formacancel123456.php?newpwd=Administrador" class="report-iframe" id="cancelaciones-iframe" onload="document.getElementById('cancelaciones-loading').style.display='none';"></iframe>
                     </div>
                 </div>
             </div>
         </div>
+        <?php endif; ?>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -3029,30 +3527,45 @@ foreach ($desglose_exentos as $persona => $datos) {
         // Estado del sidebar
         let sidebarVisible = true;
         
+        // Determinar si el usuario tiene acceso completo
+        const accesoCompleto = <?php echo $acceso_completo ? 'true' : 'false'; ?>;
+        
         // Función para restablecer filtros
         function resetFilters() {
-            window.location.href = window.location.pathname;
+            const section = new URLSearchParams(window.location.search).get('section') || 'dashboard';
+            window.location.href = window.location.pathname + '?section=' + section;
         }
 
         // Validación de fechas en el formulario
-        document.getElementById('dateFilterForm').addEventListener('submit', function(e) {
-            const fechaInicio = document.getElementById('fecha_inicio').value;
-            const fechaFin = document.getElementById('fecha_fin').value;
-            
-            if (fechaInicio && fechaFin && new Date(fechaInicio) > new Date(fechaFin)) {
-                e.preventDefault();
-                alert('La fecha de inicio no puede ser mayor que la fecha de fin');
-                return false;
-            }
-            
-            // Mostrar indicador de carga
-            document.getElementById('dashboard-loading').style.display = 'flex';
-        });
+        const dateFilterForm = document.getElementById('dateFilterForm');
+        if (dateFilterForm) {
+            dateFilterForm.addEventListener('submit', function(e) {
+                const fechaInicio = document.getElementById('fecha_inicio').value;
+                const fechaFin = document.getElementById('fecha_fin').value;
+                
+                if (fechaInicio && fechaFin && new Date(fechaInicio) > new Date(fechaFin)) {
+                    e.preventDefault();
+                    alert('La fecha de inicio no puede ser mayor que la fecha de fin');
+                    return false;
+                }
+                
+                // Mostrar indicador de carga
+                const dashboardLoading = document.getElementById('dashboard-loading');
+                if (dashboardLoading) {
+                    dashboardLoading.style.display = 'flex';
+                }
+            });
+        }
 
         // Navigation functionality
-        document.querySelectorAll('.nav-link').forEach(link => {
+        document.querySelectorAll('.nav-link:not(.disabled)').forEach(link => {
             link.addEventListener('click', function(e) {
                 e.preventDefault();
+                
+                // Si el enlace está deshabilitado, no hacer nada
+                if (this.classList.contains('disabled')) {
+                    return;
+                }
                 
                 // Remove active class from all links and sections
                 document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
@@ -3064,29 +3577,40 @@ foreach ($desglose_exentos as $persona => $datos) {
                 // Show corresponding section
                 const sectionId = this.getAttribute('data-section');
                 const section = document.getElementById(sectionId);
-                section.classList.remove('d-none');
-                
-                // Mostrar indicador de carga para cada sección
-                const loadingElement = document.getElementById(`${sectionId}-loading`);
-                if (loadingElement) {
-                    loadingElement.style.display = 'flex';
+                if (section) {
+                    section.classList.remove('d-none');
                     
-                    // Simular tiempo de carga
-                    setTimeout(() => {
-                        loadingElement.style.display = 'none';
-                    }, 1000);
-                }
-                
-                // Si es la sección de inventario, cargar el iframe
-                if (sectionId === 'inventario') {
-                    const iframe = document.getElementById('inventario-iframe');
-                    const loading = document.getElementById('inventario-loading');
-                    loading.style.display = 'flex';
+                    // Actualizar parámetro de URL
+                    const url = new URL(window.location);
+                    url.searchParams.set('section', sectionId);
+                    window.history.pushState({}, '', url);
                     
-                    // Recargar el iframe para asegurar contenido fresco
-                    setTimeout(() => {
-                        iframe.src = iframe.src;
-                    }, 500);
+                    // Mostrar indicador de carga para cada sección
+                    const loadingElement = document.getElementById(`${sectionId}-loading`);
+                    if (loadingElement) {
+                        loadingElement.style.display = 'flex';
+                        
+                        // Simular tiempo de carga
+                        setTimeout(() => {
+                            loadingElement.style.display = 'none';
+                        }, 1000);
+                    }
+                    
+                    // Si es la sección de inventario, cargar el iframe
+                    if (sectionId === 'inventario') {
+                        const iframe = document.getElementById('inventario-iframe');
+                        const loading = document.getElementById('inventario-loading');
+                        if (loading) {
+                            loading.style.display = 'flex';
+                            
+                            // Recargar el iframe para asegurar contenido fresco
+                            setTimeout(() => {
+                                if (iframe) {
+                                    iframe.src = iframe.src;
+                                }
+                            }, 500);
+                        }
+                    }
                 }
             });
         });
@@ -3118,55 +3642,64 @@ foreach ($desglose_exentos as $persona => $datos) {
         document.getElementById('refresh-usuarios-btn')?.addEventListener('click', function() {
             const iframe = document.getElementById('usuarios-iframe');
             const loading = document.getElementById('usuarios-loading');
-            loading.style.display = 'flex';
-            iframe.src = iframe.src;
+            if (loading && iframe) {
+                loading.style.display = 'flex';
+                iframe.src = iframe.src;
+            }
         });
 
         document.getElementById('refresh-report-btn')?.addEventListener('click', function() {
             const iframe = document.getElementById('report-iframe');
             const loading = document.getElementById('reportes-loading');
-            loading.style.display = 'flex';
-            iframe.src = iframe.src;
+            if (loading && iframe) {
+                loading.style.display = 'flex';
+                iframe.src = iframe.src;
+            }
         });
 
         document.getElementById('refresh-menu-btn')?.addEventListener('click', function() {
             const iframe = document.getElementById('menu-iframe');
             const loading = document.getElementById('menus-loading');
-            loading.style.display = 'flex';
-            iframe.src = iframe.src;
+            if (loading && iframe) {
+                loading.style.display = 'flex';
+                iframe.src = iframe.src;
+            }
         });
 
         // NUEVO: Botón de actualización para inventario
         document.getElementById('refresh-inventario-btn')?.addEventListener('click', function() {
             const iframe = document.getElementById('inventario-iframe');
             const loading = document.getElementById('inventario-loading');
-            loading.style.display = 'flex';
-            iframe.src = iframe.src;
+            if (loading && iframe) {
+                loading.style.display = 'flex';
+                iframe.src = iframe.src;
+            }
         });
 
         document.getElementById('refresh-cancelaciones-btn')?.addEventListener('click', function() {
             const iframe = document.getElementById('cancelaciones-iframe');
             const loading = document.getElementById('cancelaciones-loading');
-            loading.style.display = 'flex';
-            iframe.src = iframe.src;
+            if (loading && iframe) {
+                loading.style.display = 'flex';
+                iframe.src = iframe.src;
+            }
         });
 
-        // Logout confirmation - CORREGIDO
+        // Logout confirmation
         document.getElementById('logoutBtn').addEventListener('click', function(e) {
-            e.preventDefault(); // Prevenir que el enlace se ejecute inmediatamente
+            e.preventDefault();
             
             if (confirm('¿Está seguro que desea cerrar sesión?')) {
-                // Si el usuario confirma, redirigir al enlace de logout
                 window.location.href = this.href;
             }
-            // Si el usuario cancela, no hacer nada
         });
 
         // Chart initialization
         document.addEventListener('DOMContentLoaded', function() {
-            // Main Stats Chart (Doughnut) - Actualizado para incluir pagantes vs exentos
+            // Main Stats Chart (Doughnut) - Actualizado para incluir pagantes vs exentos con precios diferenciados
             const ctx = document.getElementById('statsChart');
-            if (ctx) {
+            if (ctx && accesoCompleto) {
+                // Datos de ingresos con precios diferenciados
                 const ingresosPagantes = <?php echo $monto_recaudado; ?>;
                 const ingresosExentos = <?php echo $monto_exentos; ?>;
                 const totalGastos = <?php echo $total_gastos_contpaq; ?>;
@@ -3179,10 +3712,18 @@ foreach ($desglose_exentos as $persona => $datos) {
                 const porcentajeGastos = total > 0 ? (totalGastos / total) * 100 : 0;
                 const porcentajeUtilidad = total > 0 ? (Math.abs(utilidad) / total) * 100 : 0;
                 
+                // Determinar si hay precios diferenciados
+                const precioDiferenciado = <?php echo $periodo_mixto_precios ? 'true' : 'false'; ?>;
+                
                 new Chart(ctx.getContext('2d'), {
                     type: 'doughnut',
                     data: {
-                        labels: ['Ingresos', 'Exentos (No Cobrados)', 'Gastos', 'Utilidad'],
+                        labels: [
+                            'Ingresos ', 
+                            'Exentos (No Cobrados)', 
+                            'Gastos', 
+                            'Utilidad'
+                        ],
                         datasets: [{
                             data: [
                                 porcentajeIngresosPagantes, 
@@ -3221,8 +3762,14 @@ foreach ($desglose_exentos as $persona => $datos) {
                                         
                                         if (label === 'Ingresos Pagantes') {
                                             amount = `$${ingresosPagantes.toLocaleString()}`;
+                                            if (precioDiferenciado) {
+                                                amount += ' (Precios diferenciados)';
+                                            }
                                         } else if (label === 'Exentos (No Cobrados)') {
                                             amount = `$${ingresosExentos.toLocaleString()}`;
+                                            if (precioDiferenciado) {
+                                                amount += ' (Precios diferenciados)';
+                                            }
                                         } else if (label === 'Gastos') {
                                             amount = `$${totalGastos.toLocaleString()}`;
                                         } else {
@@ -3245,6 +3792,29 @@ foreach ($desglose_exentos as $persona => $datos) {
                 const dashboardLoading = document.getElementById('dashboard-loading');
                 if (dashboardLoading) {
                     dashboardLoading.style.display = 'none';
+                }
+                
+                // Mostrar mensaje informativo si el usuario tiene acceso restringido
+                if (!accesoCompleto) {
+                    // Forzar que la sección activa sea Reportes
+                    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                    document.querySelectorAll('.section').forEach(s => s.classList.add('d-none'));
+                    
+                    const reportesLink = document.querySelector('a[data-section="reportes"]');
+                    const reportesSection = document.getElementById('reportes');
+                    
+                    if (reportesLink && reportesSection) {
+                        reportesLink.classList.add('active');
+                        reportesSection.classList.remove('d-none');
+                    }
+                    
+                    // Mostrar notificación de acceso restringido
+                    if (!sessionStorage.getItem('restriccionNotificada')) {
+                        setTimeout(() => {
+                            alert('Su usuario (CIENEGA JASSO MIRIAM) tiene acceso restringido. Solo puede acceder a la sección de "Generación de Reportes".');
+                            sessionStorage.setItem('restriccionNotificada', 'true');
+                        }, 500);
+                    }
                 }
             }, 1500);
         });
@@ -3269,6 +3839,27 @@ foreach ($desglose_exentos as $persona => $datos) {
             }
         `;
         document.head.appendChild(style);
+        
+        // Manejar parámetros de URL al cargar la página
+        window.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sectionParam = urlParams.get('section');
+            
+            if (sectionParam) {
+                const targetLink = document.querySelector(`a[data-section="${sectionParam}"]`);
+                const targetSection = document.getElementById(sectionParam);
+                
+                if (targetLink && !targetLink.classList.contains('disabled') && targetSection) {
+                    // Remover clases activas
+                    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                    document.querySelectorAll('.section').forEach(s => s.classList.add('d-none'));
+                    
+                    // Activar sección solicitada
+                    targetLink.classList.add('active');
+                    targetSection.classList.remove('d-none');
+                }
+            }
+        });
     </script>
 </body>
 </html>

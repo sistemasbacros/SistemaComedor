@@ -24,13 +24,19 @@ if (!strtotime($fechaInicio) || !strtotime($fechaFin)) {
 // ————— Verificar si es exportación a Excel —————
 $exportarExcel = isset($_GET['exportar']) && $_GET['exportar'] === 'excel';
 
-// ————— CONSULTA DE CANCELACIONES —————
+// ————— CONSULTA DE CANCELACIONES (Solo APROBADO) CON TIPO_CONSUMO Y FECHA —————
 $sqlCancelaciones = "
-SELECT Nombre, COUNT(*) as Total 
+SELECT 
+    Nombre, 
+    Tipo_Consumo,
+    FECHA,
+    COUNT(*) as Total 
 FROM cancelaciones 
-WHERE CONVERT(DATE, FECHA, 102) >= ? AND CONVERT(DATE, FECHA, 102) <= ?
-GROUP BY Nombre
-ORDER BY Total DESC
+WHERE CONVERT(DATE, FECHA, 102) >= ? 
+  AND CONVERT(DATE, FECHA, 102) <= ?
+  AND (estatus = 'APROBADO' OR estatus IS NULL OR estatus = '')
+GROUP BY Nombre, Tipo_Consumo, FECHA
+ORDER BY Nombre, FECHA
 ";
 
 $paramsCancelaciones = array($fechaInicio, $fechaFin);
@@ -38,14 +44,59 @@ $stmtCancelaciones = sqlsrv_query($conn, $sqlCancelaciones, $paramsCancelaciones
 
 $cancelacionesData = [];
 $totalCancelaciones = 0;
+$montoTotalCancelaciones = 0;
 
 if ($stmtCancelaciones) {
     while ($row = sqlsrv_fetch_array($stmtCancelaciones, SQLSRV_FETCH_ASSOC)) {
         $cancelacionesData[] = $row;
         $totalCancelaciones += $row['Total'];
+        
+        // Calcular monto por cancelación según tipo y fecha
+        $fechaCancelacion = $row['FECHA'];
+        $tipoConsumo = $row['Tipo_Consumo'];
+        
+        if ($fechaCancelacion) {
+            $fechaStr = date('Y-m-d', strtotime($fechaCancelacion));
+            $anioCancelacion = date('Y', strtotime($fechaCancelacion));
+        } else {
+            $fechaStr = 'Fecha no disponible';
+            $anioCancelacion = 0;
+        }
+        
+        $es2026OMayor = ($anioCancelacion >= 2026);
+        $tipoNormalizado = strtolower(trim($tipoConsumo));
+        
+        if ($es2026OMayor) {
+            if (strpos($tipoNormalizado, 'desayuno') !== false || $tipoNormalizado == 'desayuno') {
+                $monto = 35;
+            } elseif (strpos($tipoNormalizado, 'comida') !== false || $tipoNormalizado == 'comida') {
+                $monto = 45;
+            } elseif (strpos($tipoNormalizado, 'ambos') !== false || $tipoNormalizado == 'ambos') {
+                $monto = 80;
+            } else {
+                $monto = 40;
+            }
+        } else {
+            if (strpos($tipoNormalizado, 'desayuno') !== false || 
+                strpos($tipoNormalizado, 'comida') !== false || 
+                $tipoNormalizado == 'desayuno' || 
+                $tipoNormalizado == 'comida') {
+                $monto = 30;
+            } elseif (strpos($tipoNormalizado, 'ambos') !== false || $tipoNormalizado == 'ambos') {
+                $monto = 60;
+            } else {
+                $monto = 30;
+            }
+        }
+        
+        $montoTotalCancelaciones += $monto * $row['Total'];
+        
+        $cancelacionesData[count($cancelacionesData)-1]['MontoUnitario'] = $monto;
+        $cancelacionesData[count($cancelacionesData)-1]['MontoTotal'] = $monto * $row['Total'];
+        $cancelacionesData[count($cancelacionesData)-1]['FechaStr'] = $fechaStr;
+        $cancelacionesData[count($cancelacionesData)-1]['Anio'] = $anioCancelacion;
+        $cancelacionesData[count($cancelacionesData)-1]['TipoNormalizado'] = $tipoNormalizado;
     }
-} else {
-    $cancelacionesData = [];
 }
 
 // ————— CONSULTA DE COMPLEMENTOS —————
@@ -126,8 +177,6 @@ if ($stmtComplementos) {
             }
         }
     }
-} else {
-    $complementosData = [];
 }
 
 // ————— CONSULTA PRINCIPAL —————
@@ -184,96 +233,201 @@ SELECT @columnsSum = STRING_AGG('ISNULL(' + TRIM(value) + ', 0)', ' + ')
 FROM STRING_SPLIT(REPLACE(@columns, ' ', ''), ',');
 
 SET @sql = N'
-;WITH EntradasCTE AS (
-    Select Empleado, Nombre as Nombre, Total from (
-        Select No_Empleado as Empleado, Nombre, Count(*) as Total from (
+;WITH EntradasDetalleCTE AS (
+    SELECT 
+        NE_EXTRAIDO1 AS No_Empleado,
+        c.Nombre,
+        Tipo_Comida,
+        CONVERT(VARCHAR(10), CONVERT(DATE, Hora_Entrada, 105), 23) AS Fecha,
+        YEAR(CONVERT(DATE, Hora_Entrada, 105)) AS Anio
+    FROM (
+        Select * from (
+            Select a1.Id_Empleado,a1.Nombre,a1.Area,a1.Hora_Entrada,a1.Fecha as FechaEntrada,a1.NE_Extraido,a1.Tipo_Comida,
+            NE_EXTRAIDO1 = case when a1.NE_EXTRAIDO1 is NULL or a1.NE_EXTRAIDO1='''' or a1.NE_EXTRAIDO1=''NULL'' then a2.Id_Empleado else a1.NE_EXTRAIDO1 end 
+            from (
+                SELECT *, 
+                    NE_EXTRAIDO1 = 
+                        CASE 
+                            WHEN Nombre LIKE ''%dionisio%'' THEN ''46''
+                            WHEN Nombre LIKE ''%esquivel edgar%'' OR nombre LIKE ''%edgar gutie%'' OR nombre LIKE ''%GUTIERREZ EZQUIVEL%'' THEN ''18'' 
+                            WHEN Nombre LIKE ''%Luna castro%'' THEN ''1'' 
+                            ELSE NE_Extraido 
+                        END
+                FROM (
+                    SELECT *,
+                        LTRIM(RTRIM(
+                            CASE 
+                                WHEN CHARINDEX(''N.E:'', nombre) > 0 THEN
+                                    SUBSTRING(
+                                        nombre,
+                                        CHARINDEX(''N.E:'', nombre) + LEN(''N.E:''), 
+                                        CASE 
+                                            WHEN CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''N.E:'', nombre)) > 0 THEN
+                                                CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''N.E:'', nombre)) - (CHARINDEX(''N.E:'', nombre) + LEN(''N.E:''))
+                                            ELSE LEN(nombre)
+                                        END
+                                    )
+                                WHEN CHARINDEX(''NE: '', nombre) > 0 THEN
+                                    SUBSTRING(
+                                        nombre,
+                                        CHARINDEX(''NE: '', nombre) + LEN(''NE: ''), 
+                                        CASE 
+                                            WHEN CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''NE: '', nombre)) > 0 THEN
+                                                CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''NE: '', nombre)) - (CHARINDEX(''NE: '', nombre) + LEN(''NE: ''))
+                                            ELSE LEN(nombre)
+                                        END
+                                    )
+                                WHEN CHARINDEX(''NE:'', nombre) > 0 THEN
+                                    SUBSTRING(
+                                        nombre,
+                                        CHARINDEX(''NE:'', nombre) + LEN(''NE:''), 
+                                        CASE 
+                                            WHEN CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''NE:'', nombre)) > 0 THEN
+                                                CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''NE:'', nombre)) - (CHARINDEX(''NE:'', nombre) + LEN(''NE:''))
+                                            ELSE LEN(nombre)
+                                        END
+                                    )
+                                WHEN CHARINDEX(''ID:NE0'', nombre) > 0 THEN
+                                    SUBSTRING(
+                                        nombre,
+                                        CHARINDEX(''ID:NE0'', nombre) + LEN(''ID:NE0''), 
+                                        CASE 
+                                            WHEN CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''ID:NE0'', nombre)) > 0 THEN
+                                                CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''ID:NE0'', nombre)) - (CHARINDEX(''ID:NE0'', nombre) + LEN(''ID:NE0''))
+                                            ELSE LEN(nombre)
+                                        END
+                                    )
+                                ELSE NULL
+                            END
+                        )) AS NE_Extraido,
+                        CASE 
+                            WHEN CAST(Fecha AS TIME) < ''12:00:00'' THEN ''Desayuno''
+                            ELSE ''Comida''
+                        END AS Tipo_Comida
+                    FROM Entradas
+                    WHERE not nombre=''.'' and not nombre='''' and not nombre LIKE ''[0-9]%'' AND (convert(date,Hora_Entrada, 103) >= ''$fechaInicio'' and convert(date,Hora_Entrada, 103) <= ''$fechaFin'')  
+                ) AS a 
+            ) as a1
+            left JOIN (
+                select m1.Nombre,m1.NombreV,m2.Id_Empleado,Hora_Entrada,fecha from (
+                    Select Nombre, LEFT(Nombre, CHARINDEX('' se encuentra registrado para el'', Nombre) - 1) as NombreV ,hora_entrada,fecha from entradas
+                    where Nombre LIKE ''%se encuentra registrado para el%'' AND (convert(date,Hora_Entrada, 103) >= ''$fechaInicio'' and convert(date,Hora_Entrada, 103) <= ''$fechaFin'') 
+                ) as m1
+                left join (Select * from conped) as m2 on m1.NombreV=m2.Nombre
+            ) as a2 on a1.Nombre=a2.Nombre and a1.Hora_Entrada=a2.Hora_Entrada and a1.fecha=a2.fecha 
+        ) as a
+    ) AS b
+    LEFT JOIN (SELECT Id_Empleado, Nombre FROM ConPed) AS c ON b.NE_EXTRAIDO1 = c.Id_Empleado
+),
+EntradasCTE AS (
+    SELECT 
+        No_Empleado as Empleado,
+        Nombre,
+        COUNT(*) as Total,
+        SUM(CASE WHEN Tipo_Comida = ''Desayuno'' THEN 1 ELSE 0 END) as TotalDesayunos,
+        SUM(CASE WHEN Tipo_Comida = ''Comida'' THEN 1 ELSE 0 END) as TotalComidas,
+        SUM(CASE 
+                WHEN Tipo_Comida = ''Desayuno'' AND Anio < 2026 THEN 30
+                WHEN Tipo_Comida = ''Desayuno'' AND Anio >= 2026 THEN 35
+                ELSE 0
+            END) AS MontoDesayunos,
+        SUM(CASE 
+                WHEN Tipo_Comida = ''Comida'' AND Anio < 2026 THEN 30
+                WHEN Tipo_Comida = ''Comida'' AND Anio >= 2026 THEN 45
+                ELSE 0
+            END) AS MontoComidas
+    FROM EntradasDetalleCTE
+    GROUP BY No_Empleado, Nombre
+),
+PedidosCTE AS (
+    SELECT 
+        Id_Empleado,
+        Nombre,
+        SUM(CASE WHEN Tipo_Comida = ''Desayuno'' THEN 1 ELSE 0 END) AS TotalConsumosDesayunos,
+        SUM(CASE WHEN Tipo_Comida = ''Comida'' THEN 1 ELSE 0 END) AS TotalConsumosComidas,
+        SUM(CASE 
+                WHEN Tipo_Comida = ''Desayuno'' AND YEAR(Fecha) < 2026 THEN 1 * 30
+                WHEN Tipo_Comida = ''Desayuno'' AND YEAR(Fecha) >= 2026 THEN 1 * 35
+                WHEN Tipo_Comida = ''Comida'' AND YEAR(Fecha) < 2026 THEN 1 * 30
+                WHEN Tipo_Comida = ''Comida'' AND YEAR(Fecha) >= 2026 THEN 1 * 45
+                ELSE 0
+            END) AS MontoConsumos,
+        SUM(CASE 
+                WHEN Tipo_Comida = ''Desayuno'' AND YEAR(Fecha) < 2026 THEN 30
+                WHEN Tipo_Comida = ''Desayuno'' AND YEAR(Fecha) >= 2026 THEN 35
+                ELSE 0
+            END) AS MontoConsumosDesayunos,
+        SUM(CASE 
+                WHEN Tipo_Comida = ''Comida'' AND YEAR(Fecha) < 2026 THEN 30
+                WHEN Tipo_Comida = ''Comida'' AND YEAR(Fecha) >= 2026 THEN 45
+                ELSE 0
+            END) AS MontoConsumosComidas
+    FROM (
+        SELECT 
+            CAST(Fecha_Dia AS DATE) AS Fecha,
+            Id_Empleado,
+            Nombre,
+            Tipo_Comida
+        FROM (
             SELECT 
-                Fecha1,
-                NE_EXTRAIDO1 AS No_Empleado,
-                c.Nombre,
-                Tipo_Comida
-            FROM (
-                Select * from (
-                    Select a1.Id_Empleado,a1.Nombre,a1.Area,a1.Hora_Entrada,a1.Fecha,a1.NE_Extraido,a1.Tipo_Comida,a1.Fecha1,
-                    NE_EXTRAIDO1 = case when a1.NE_EXTRAIDO1 is NULL or a1.NE_EXTRAIDO1='''' or a1.NE_EXTRAIDO1=''NULL'' then a2.Id_Empleado else a1.NE_EXTRAIDO1 end 
-                    from (
-                        SELECT *, 
-                            NE_EXTRAIDO1 = 
-                                CASE 
-                                    WHEN Nombre LIKE ''%dionisio%'' THEN ''46''
-                                    WHEN Nombre LIKE ''%esquivel edgar%'' OR nombre LIKE ''%edgar gutie%'' OR nombre LIKE ''%GUTIERREZ EZQUIVEL%'' THEN ''18'' 
-                                    WHEN Nombre LIKE ''%Luna castro%'' THEN ''1'' 
-                                    ELSE NE_Extraido 
-                                END
-                        FROM (
-                            SELECT *,
-                                LTRIM(RTRIM(
-                                    CASE 
-                                        WHEN CHARINDEX(''N.E:'', nombre) > 0 THEN
-                                            SUBSTRING(
-                                                nombre,
-                                                CHARINDEX(''N.E:'', nombre) + LEN(''N.E:''), 
-                                                CASE 
-                                                    WHEN CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''N.E:'', nombre)) > 0 THEN
-                                                        CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''N.E:'', nombre)) - (CHARINDEX(''N.E:'', nombre) + LEN(''N.E:''))
-                                                    ELSE LEN(nombre)
-                                                END
-                                            )
-                                        WHEN CHARINDEX(''NE: '', nombre) > 0 THEN
-                                            SUBSTRING(
-                                                nombre,
-                                                CHARINDEX(''NE: '', nombre) + LEN(''NE: ''), 
-                                                CASE 
-                                                    WHEN CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''NE: '', nombre)) > 0 THEN
-                                                        CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''NE: '', nombre)) - (CHARINDEX(''NE: '', nombre) + LEN(''NE: ''))
-                                                    ELSE LEN(nombre)
-                                                END
-                                            )
-                                        WHEN CHARINDEX(''NE:'', nombre) > 0 THEN
-                                            SUBSTRING(
-                                                nombre,
-                                                CHARINDEX(''NE:'', nombre) + LEN(''NE:''), 
-                                                CASE 
-                                                    WHEN CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''NE:'', nombre)) > 0 THEN
-                                                        CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''NE:'', nombre)) - (CHARINDEX(''NE:'', nombre) + LEN(''NE:''))
-                                                    ELSE LEN(nombre)
-                                                END
-                                            )
-                                        WHEN CHARINDEX(''ID:NE0'', nombre) > 0 THEN
-                                            SUBSTRING(
-                                                nombre,
-                                                CHARINDEX(''ID:NE0'', nombre) + LEN(''ID:NE0''), 
-                                                CASE 
-                                                    WHEN CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''ID:NE0'', nombre)) > 0 THEN
-                                                        CHARINDEX(''DEPARTAMENTO'', nombre, CHARINDEX(''ID:NE0'', nombre)) - (CHARINDEX(''ID:NE0'', nombre) + LEN(''ID:NE0''))
-                                                    ELSE LEN(nombre)
-                                                END
-                                            )
-                                        ELSE NULL
-                                    END
-                                )) AS NE_Extraido,
-                                CASE 
-                                    WHEN CAST(Fecha AS TIME) < ''12:00:00'' THEN ''Desayuno''
-                                    ELSE ''Comida''
-                                END AS Tipo_Comida,
-                                CONVERT(VARCHAR(10), CONVERT(DATE, Hora_Entrada, 105), 23) AS Fecha1
-                            FROM Entradas
-                            WHERE not nombre=''.'' and not nombre='''' and not nombre LIKE ''[0-9]%'' AND (convert(date,Hora_Entrada, 103) >= ''$fechaInicio'' and convert(date,Hora_Entrada, 103) <= ''$fechaFin'')  
-                        ) AS a 
-                    ) as a1
-                    left JOIN (
-                        select m1.Nombre,m1.NombreV,m2.Id_Empleado,Hora_Entrada,fecha from (
-                            Select Nombre, LEFT(Nombre, CHARINDEX('' se encuentra registrado para el'', Nombre) - 1) as NombreV ,hora_entrada,fecha from entradas
-                            where Nombre LIKE ''%se encuentra registrado para el%'' AND (convert(date,Hora_Entrada, 103) >= ''$fechaInicio'' and convert(date,Hora_Entrada, 103) <= ''$fechaFin'') 
-                        ) as m1
-                        left join (Select * from conped) as m2 on m1.NombreV=m2.Nombre
-                    ) as a2 on a1.Nombre=a2.Nombre and a1.Hora_Entrada=a2.Hora_Entrada and a1.fecha=a2.fecha 
-                ) as a
-            ) AS b
-            LEFT JOIN (SELECT Id_Empleado, Nombre FROM ConPed) AS c ON b.NE_EXTRAIDO1 = c.Id_Empleado
-        ) as tt1
-        Group by No_Empleado, Nombre 
-    ) as tt3
+                Id_Empleado,
+                Usuario,
+                Fecha AS Fecha_Base,
+                Dia,
+                DATEADD(DAY,
+                        CASE Dia
+                            WHEN ''Lunes'' THEN 0
+                            WHEN ''Martes'' THEN 1
+                            WHEN ''Miercoles'' THEN 2
+                            WHEN ''Jueves'' THEN 3
+                            WHEN ''Viernes'' THEN 4
+                        END
+                        - (DATEPART(WEEKDAY, Fecha) + @@DATEFIRST - 2) % 7
+                    , Fecha) AS Fecha_Dia,
+                Tipo_Comida,
+                Costo
+            FROM PedidosComida
+            CROSS APPLY (
+                VALUES 
+                    (''Lunes'', Lunes),
+                    (''Martes'', Martes),
+                    (''Miercoles'', Miercoles),
+                    (''Jueves'', Jueves),
+                    (''Viernes'', Viernes)
+            ) AS unpivoted(Dia, Tipo_Comida)
+        ) AS e1
+        RIGHT JOIN
+            (SELECT Id_Empleado AS Id_Empleado2, Nombre FROM ConPed) AS e2
+        ON e1.Id_Empleado = e2.Id_Empleado2
+    ) AS PedidosData
+    WHERE Fecha >= ''$fechaInicio'' AND Fecha <= ''$fechaFin''
+    GROUP BY Id_Empleado, Nombre
+),
+CancelacionesCTE AS (
+    SELECT 
+        Nombre,
+        SUM(
+            CASE 
+                WHEN Tipo_Consumo = ''DESAYUNO'' AND YEAR(CONVERT(DATE, FECHA, 102)) < 2026 THEN Total * 30
+                WHEN Tipo_Consumo = ''DESAYUNO'' AND YEAR(CONVERT(DATE, FECHA, 102)) >= 2026 THEN Total * 35
+                WHEN Tipo_Consumo = ''COMIDA'' AND YEAR(CONVERT(DATE, FECHA, 102)) < 2026 THEN Total * 30
+                WHEN Tipo_Consumo = ''COMIDA'' AND YEAR(CONVERT(DATE, FECHA, 102)) >= 2026 THEN Total * 45
+                ELSE 0
+            END
+        ) AS MontoCancelaciones
+    FROM (
+        SELECT 
+            Nombre, 
+            Tipo_Consumo,
+            FECHA,
+            COUNT(*) as Total 
+        FROM cancelaciones 
+        WHERE CONVERT(DATE, FECHA, 102) >= ''$fechaInicio'' 
+          AND CONVERT(DATE, FECHA, 102) <= ''$fechaFin''
+          AND (estatus = ''APROBADO'' OR estatus IS NULL OR estatus = '''')
+        GROUP BY Nombre, Tipo_Consumo, FECHA
+    ) AS CancelacionesBase
+    GROUP BY Nombre
 )
 
 SELECT 
@@ -281,9 +435,37 @@ SELECT
     Nombre = case when pvt.Id_Empleado>0 then pvt.Nombre else ISNULL(e.Nombre, pvt.Nombre) end, 
     ' + @columns + ',
     ' + @columnsSum + ' AS TotalConsumos,
+    ISNULL(p.TotalConsumosDesayunos, 0) AS TotalConsumosDesayunos,
+    ISNULL(p.TotalConsumosComidas, 0) AS TotalConsumosComidas,
+    ISNULL(p.MontoConsumosDesayunos, 0) AS MontoConsumosDesayunos,
+    ISNULL(p.MontoConsumosComidas, 0) AS MontoConsumosComidas,
+    ISNULL(p.MontoConsumos, 0) AS MontoConsumos,
     ISNULL(e.Empleado, pvt.Id_Empleado) AS Empleado,
     ISNULL(e.Nombre, pvt.Nombre) AS NombreEntradas,
-    ISNULL(e.Total, 0) AS TotalEntradas
+    ISNULL(e.Total, 0) AS TotalEntradas,
+    ISNULL(e.TotalDesayunos, 0) AS TotalDesayunos,
+    ISNULL(e.TotalComidas, 0) AS TotalComidas,
+    ISNULL(e.MontoDesayunos, 0) AS MontoEntradasDesayunos,
+    ISNULL(e.MontoComidas, 0) AS MontoEntradasComidas,
+    ISNULL(e.MontoDesayunos + e.MontoComidas, 0) AS MontoEntradasTotal,
+    ISNULL(p.MontoConsumos, 0) - ISNULL(e.MontoDesayunos + e.MontoComidas, 0) AS DIFCONSUENTRADAS,
+    CASE 
+        WHEN ISNULL(p.MontoConsumos, 0) - ISNULL(e.MontoDesayunos + e.MontoComidas, 0) > 0 
+        THEN ISNULL(p.MontoConsumos, 0) - ISNULL(e.MontoDesayunos + e.MontoComidas, 0)
+        ELSE 0 
+    END AS MontoQueNosetomo,
+    ISNULL(c.MontoCancelaciones, 0) AS MontoCancelaciones,
+    CASE 
+        WHEN (ISNULL(p.MontoConsumos, 0) - ISNULL(e.MontoDesayunos + e.MontoComidas, 0)) > 0 
+        THEN ((ISNULL(p.MontoConsumos, 0) - ISNULL(e.MontoDesayunos + e.MontoComidas, 0)) - ISNULL(c.MontoCancelaciones, 0)) * 2
+        ELSE 0 
+    END AS MontoFinalque,
+    ISNULL(e.MontoDesayunos + e.MontoComidas, 0) + 
+    CASE 
+        WHEN (ISNULL(p.MontoConsumos, 0) - ISNULL(e.MontoDesayunos + e.MontoComidas, 0)) > 0 
+        THEN ((ISNULL(p.MontoConsumos, 0) - ISNULL(e.MontoDesayunos + e.MontoComidas, 0)) - ISNULL(c.MontoCancelaciones, 0)) * 2
+        ELSE 0 
+    END AS MontoFinalDescontar
 FROM (
     SELECT 
         CAST(Fecha AS CHAR) AS fecha,
@@ -337,6 +519,8 @@ PIVOT (
     FOR fecha IN (' + @columns + ')
 ) AS pvt
 RIGHT JOIN EntradasCTE e ON pvt.Id_Empleado = e.Empleado
+LEFT JOIN PedidosCTE p ON pvt.Id_Empleado = p.Id_Empleado
+LEFT JOIN CancelacionesCTE c ON e.Nombre = c.Nombre
 ORDER BY pvt.Id_Empleado;
 ';
 
@@ -348,138 +532,194 @@ $stmt = sqlsrv_query($conn, $sql);
 
 // Procesar resultados principales
 $totalEmpleados = 0;
-$totalConsumos = 0;
-$totalEntradas = 0;
-$montoTotalConsumos = 0;
-$montoTotalEntradas = 0;
-
 $rows = [];
 
 if ($stmt) {
     while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-        $totalConsumosValue = isset($row['TotalConsumos']) ? intval($row['TotalConsumos']) : 0;
-        $totalEntradasValue = isset($row['TotalEntradas']) ? intval($row['TotalEntradas']) : 0;
-        
-        $row['MontoConsumos'] = $totalConsumosValue * 30;
-        $row['MontoEntradas'] = $totalEntradasValue * 30;
-        
-        $montoTotalConsumos += $row['MontoConsumos'];
-        $montoTotalEntradas += $row['MontoEntradas'];
-        $totalConsumos += $totalConsumosValue;
-        $totalEntradas += $totalEntradasValue;
-        
-        // Calcular total complementos y cancelaciones para este empleado
-        $totalComplementosEmpleado = 0;
-        $totalCancelacionesEmpleado = 0;
-        
-        // Buscar complementos para este empleado
-        foreach ($complementosData as $complemento) {
-            if ($complemento['Nombre'] == $row['Nombre']) {
-                $totalComplementosEmpleado = 
-                    $complemento['CAFÉ O TÉ'] + 
-                    $complemento['TORTILLAS'] + 
-                    $complemento['AGUA'] + 
-                    $complemento['DESECHABLE'];
-                break;
-            }
+        if (empty($row['Id_Empleado']) || $row['Id_Empleado'] <= 0) {
+            continue;
         }
-        
-        // Buscar cancelaciones para este empleado
-        foreach ($cancelacionesData as $cancelacion) {
-            if ($cancelacion['Nombre'] == $row['Nombre']) {
-                $totalCancelacionesEmpleado = $cancelacion['Total'];
-                break;
-            }
-        }
-        
-        // Agregar las columnas nuevas al array
-        $row['TotalComplementos'] = $totalComplementosEmpleado;
-        $row['TotalCancelaciones'] = $totalCancelacionesEmpleado;
         
         $rows[] = $row;
         $totalEmpleados++;
     }
 }
 
-// ————— EXPORTACIÓN A EXCEL —————
+// ==============================================
+// EXPORTACIÓN A EXCEL (.xls) SIMPLE
+// ==============================================
 if ($exportarExcel && $stmt && count($rows) > 0) {
     header('Content-Type: application/vnd.ms-excel');
     header('Content-Disposition: attachment; filename="reporte_comedor_' . date('Y-m-d') . '.xls"');
     
-    echo '<table border="1">';
-    echo '<tr><th colspan="10" style="background:#1e3a5c;color:white;font-size:16px;padding:10px;">REPORTE DE COMEDOR</th></tr>';
-    echo '<tr><th colspan="10" style="background:#2d4a72;color:white;padding:8px;">Periodo: ' . $fechaInicio . ' al ' . $fechaFin . '</th></tr>';
+    echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reporte de Comedor</title></head><body>';
     
-    // Encabezados
-    echo '<tr style="background:#3d5a80;color:white;font-weight:bold;">';
+    // TABLA PRINCIPAL
     if (count($rows) > 0) {
+        echo '<table border="1" cellspacing="0" cellpadding="3" style="font-family:Calibri;font-size:11px;border-collapse:collapse;">';
+        
+        echo '<tr>';
+        echo '<th colspan="' . (count($rows[0]) - 2) . '" style="background:#1e3a5c;color:white;font-size:14px;padding:8px;text-align:center;">';
+        echo 'REPORTE DE COMEDOR - REGISTRO DETALLADO DE CONSUMOS';
+        echo '</th>';
+        echo '</tr>';
+        
+        echo '<tr>';
+        echo '<th colspan="' . (count($rows[0]) - 2) . '" style="background:#2d4a72;color:white;font-size:11px;padding:6px;text-align:center;">';
+        echo 'PERÍODO: ' . $fechaInicio . ' al ' . $fechaFin;
+        echo '</th>';
+        echo '</tr>';
+        
+        // Encabezados
+        echo '<tr style="background:#1e3a5c;color:white;font-weight:bold;">';
         $firstRow = $rows[0];
         foreach ($firstRow as $col => $val) {
             if (!in_array($col, ['Empleado', 'NombreEntradas'])) {
-                echo '<th style="padding:8px;border:1px solid #ddd;">' . $col . '</th>';
+                echo '<th style="padding:5px;border:1px solid #2d4a72;text-align:center;">' . htmlspecialchars($col) . '</th>';
             }
         }
-    }
-    echo '</tr>';
-    
-    // Datos
-    foreach ($rows as $row) {
-        echo '<tr>';
-        foreach ($row as $col => $val) {
-            if (in_array($col, ['Empleado', 'NombreEntradas'])) continue;
-            
-            if ($col === 'MontoConsumos' || $col === 'MontoEntradas') {
-                echo '<td style="padding:6px;border:1px solid #ddd;text-align:right;">$' . number_format($val, 2) . '</td>';
-            } elseif ($col === 'TotalComplementos' || $col === 'TotalCancelaciones') {
-                echo '<td style="padding:6px;border:1px solid #ddd;text-align:center;font-weight:bold;">' . $val . '</td>';
-            } else {
-                echo '<td style="padding:6px;border:1px solid #ddd;">' . $val . '</td>';
-            }
-        }
-        echo '</tr>';
-    }
-    
-    // Sección de Cancelaciones
-    if (count($cancelacionesData) > 0) {
-        echo '<tr><td colspan="10" style="background:#dc3545;color:white;font-weight:bold;padding:10px;text-align:center;">CANCELACIONES</td></tr>';
-        echo '<tr style="background:#e74c3c;color:white;font-weight:bold;">';
-        echo '<th style="padding:8px;border:1px solid #ddd;">Nombre</th>';
-        echo '<th style="padding:8px;border:1px solid #ddd;">Total Cancelaciones</th>';
         echo '</tr>';
         
-        foreach ($cancelacionesData as $cancelacion) {
+        // Datos
+        foreach ($rows as $row) {
             echo '<tr>';
-            echo '<td style="padding:6px;border:1px solid #ddd;">' . $cancelacion['Nombre'] . '</td>';
-            echo '<td style="padding:6px;border:1px solid #ddd;text-align:center;">' . $cancelacion['Total'] . '</td>';
+            foreach ($row as $col => $val) {
+                if (in_array($col, ['Empleado', 'NombreEntradas'])) continue;
+                
+                $style = 'padding:4px;border:1px solid #ddd;text-align:center;';
+                
+                if (strpos($col, 'Monto') === 0) {
+                    $style .= 'text-align:right;';
+                    $val = '$' . number_format($val, 2);
+                }
+                
+                echo '<td style="' . $style . '">' . htmlspecialchars($val) . '</td>';
+            }
             echo '</tr>';
         }
+        
+        echo '</table><br><br>';
     }
     
-    // Sección de Complementos
+    // COMPLEMENTOS
     if (count($complementosData) > 0) {
-        echo '<tr><td colspan="10" style="background:#28a745;color:white;font-weight:bold;padding:10px;text-align:center;">COMPLEMENTOS</td></tr>';
-        echo '<tr style="background:#34ce57;color:white;font-weight:bold;">';
-        echo '<th style="padding:8px;border:1px solid #ddd;">Nombre</th>';
-        echo '<th style="padding:8px;border:1px solid #ddd;">CAFÉ O TÉ</th>';
-        echo '<th style="padding:8px;border:1px solid #ddd;">TORTILLAS</th>';
-        echo '<th style="padding:8px;border:1px solid #ddd;">AGUA</th>';
-        echo '<th style="padding:8px;border:1px solid #ddd;">DESECHABLE</th>';
+        echo '<table border="1" cellspacing="0" cellpadding="3" style="font-family:Calibri;font-size:11px;border-collapse:collapse;">';
+        
+        echo '<tr>';
+        echo '<th colspan="6" style="background:#229954;color:white;font-size:14px;padding:8px;text-align:center;">';
+        echo 'REPORTE DE COMPLEMENTOS';
+        echo '</th>';
+        echo '</tr>';
+        
+        echo '<tr style="background:#229954;color:white;font-weight:bold;">';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:left;">Nombre del Empleado</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">CAFÉ O TÉ</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">TORTILLAS</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">AGUA</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">DESECHABLE</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">TOTAL</th>';
         echo '</tr>';
         
         foreach ($complementosData as $complemento) {
+            $total = $complemento['CAFÉ O TÉ'] + $complemento['TORTILLAS'] + $complemento['AGUA'] + $complemento['DESECHABLE'];
             echo '<tr>';
-            echo '<td style="padding:6px;border:1px solid #ddd;">' . $complemento['Nombre'] . '</td>';
-            echo '<td style="padding:6px;border:1px solid #ddd;text-align:center;">' . $complemento['CAFÉ O TÉ'] . '</td>';
-            echo '<td style="padding:6px;border:1px solid #ddd;text-align:center;">' . $complemento['TORTILLAS'] . '</td>';
-            echo '<td style="padding:6px;border:1px solid #ddd;text-align:center;">' . $complemento['AGUA'] . '</td>';
-            echo '<td style="padding:6px;border:1px solid #ddd;text-align:center;">' . $complemento['DESECHABLE'] . '</td>';
+            echo '<td style="padding:4px;border:1px solid #ddd;text-align:left;">' . htmlspecialchars($complemento['Nombre']) . '</td>';
+            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;">' . $complemento['CAFÉ O TÉ'] . '</td>';
+            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;">' . $complemento['TORTILLAS'] . '</td>';
+            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;">' . $complemento['AGUA'] . '</td>';
+            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;">' . $complemento['DESECHABLE'] . '</td>';
+            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;font-weight:bold;background:#d5f4e6;">' . $total . '</td>';
             echo '</tr>';
         }
+        
+        echo '<tr style="background:#1e8449;color:white;font-weight:bold;">';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">TOTALES:</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['CAFÉ O TÉ'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['TORTILLAS'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['AGUA'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['DESECHABLE'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $totalComplementos . '</td>';
+        echo '</tr>';
+        
+        echo '</table><br><br>';
     }
     
-    echo '</table>';
+    // CANCELACIONES
+    if (count($cancelacionesData) > 0) {
+        echo '<table border="1" cellspacing="0" cellpadding="3" style="font-family:Calibri;font-size:11px;border-collapse:collapse;">';
+        
+        echo '<tr>';
+        echo '<th colspan="6" style="background:#cb4335;color:white;font-size:14px;padding:8px;text-align:center;">';
+        echo 'REPORTE DE CANCELACIONES (SOLO APROBADAS)';
+        echo '</th>';
+        echo '</tr>';
+        
+        echo '<tr style="background:#cb4335;color:white;font-weight:bold;">';
+        echo '<th style="padding:5px;border:1px solid #b03a2e;text-align:left;">Nombre del Empleado</th>';
+        echo '<th style="padding:5px;border:1px solid #b03a2e;text-align:center;">Tipo Consumo</th>';
+        echo '<th style="padding:5px;border:1px solid #b03a2e;text-align:center;">Fecha</th>';
+        echo '<th style="padding:5px;border:1px solid #b03a2e;text-align:center;">Cantidad</th>';
+        echo '<th style="padding:5px;border:1px solid #b03a2e;text-align:center;">Tarifa</th>';
+        echo '<th style="padding:5px;border:1px solid #b03a2e;text-align:center;">Monto</th>';
+        echo '</tr>';
+        
+        foreach ($cancelacionesData as $cancelacion) {
+            $fecha = $cancelacion['FechaStr'] ?? 'Fecha no disponible';
+            $tipo = $cancelacion['Tipo_Consumo'];
+            $cantidad = $cancelacion['Total'];
+            $montoUnitario = $cancelacion['MontoUnitario'] ?? 0;
+            $montoTotal = $cancelacion['MontoTotal'] ?? 0;
+            $anio = $cancelacion['Anio'] ?? 0;
+            $tipoNormalizado = $cancelacion['TipoNormalizado'] ?? '';
+            $es2026OMayor = ($anio >= 2026);
+            
+            if ($es2026OMayor) {
+                if (strpos($tipoNormalizado, 'desayuno') !== false) {
+                    $tarifaTexto = '$35 (2026+ Desayuno)';
+                } elseif (strpos($tipoNormalizado, 'comida') !== false) {
+                    $tarifaTexto = '$45 (2026+ Comida)';
+                } elseif (strpos($tipoNormalizado, 'ambos') !== false) {
+                    $tarifaTexto = '$80 (2026+ Ambos)';
+                } else {
+                    $tarifaTexto = '$' . $montoUnitario . ' (2026+)';
+                }
+            } else {
+                if (strpos($tipoNormalizado, 'desayuno') !== false || strpos($tipoNormalizado, 'comida') !== false) {
+                    $tarifaTexto = '$30 (Antes 2026)';
+                } elseif (strpos($tipoNormalizado, 'ambos') !== false) {
+                    $tarifaTexto = '$60 (Antes 2026 Ambos)';
+                } else {
+                    $tarifaTexto = '$' . $montoUnitario . ' (Antes 2026)';
+                }
+            }
+            
+            echo '<tr>';
+            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:left;">' . htmlspecialchars($cancelacion['Nombre']) . '</td>';
+            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;">' . $tipo . '</td>';
+            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;">' . $fecha . '</td>';
+            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;font-weight:bold;color:#e74c3c;">' . $cantidad . '</td>';
+            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;">' . $tarifaTexto . '</td>';
+            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;font-weight:bold;color:#c0392b;">$' . number_format($montoTotal, 2) . '</td>';
+            echo '</tr>';
+        }
+        
+        echo '<tr style="background:#a93226;color:white;font-weight:bold;">';
+        echo '<td colspan="3" style="padding:5px;border:1px solid #922b21;text-align:right;">TOTALES:</td>';
+        echo '<td style="padding:5px;border:1px solid #922b21;text-align:center;">' . $totalCancelaciones . '</td>';
+        echo '<td style="padding:5px;border:1px solid #922b21;text-align:center;">-</td>';
+        echo '<td style="padding:5px;border:1px solid #922b21;text-align:center;">$' . number_format($montoTotalCancelaciones, 2) . '</td>';
+        echo '</tr>';
+        
+        echo '</table>';
+    }
+    
+    echo '</body></html>';
     exit;
 }
+
+// ==============================================
+// INTERFAZ WEB
+// ==============================================
 
 if (!$exportarExcel):
 ?>
@@ -487,7 +727,7 @@ if (!$exportarExcel):
 <html lang="es">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reporte de Comedor</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
@@ -497,1261 +737,758 @@ if (!$exportarExcel):
     <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/fixedcolumns/4.3.0/js/dataTables.fixedColumns.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* ===== ESTILOS MEJORADOS PARA MEJOR LECTURA ===== */
-        :root {
-            --primary-color: #1e3a5c;
-            --secondary-color: #2d4a72;
-            --accent-color: #3d5a80;
-            --success-color: #28a745;
-            --danger-color: #dc3545;
-            --warning-color: #ffc107;
-            --info-color: #17a2b8;
-            --light-color: #f8f9fa;
-            --dark-color: #343a40;
-            --gold-color: #d4af37;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-
+        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f5f7fa;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #f8f9fa;
             color: #333;
-            line-height: 1.6;
+            line-height: 1.5;
             padding: 15px;
-            font-size: 14px;
         }
-
-        .container-fluid {
-            max-width: 1400px;
-            padding: 0 15px;
-        }
-
-        /* ===== MEJORAS EN EL HEADER ===== */
-        .header-container {
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 25px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-
-        .header-title {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .header-subtitle {
-            font-size: 14px;
-            opacity: 0.9;
-            margin-bottom: 15px;
-        }
-
-        .period-info {
-            background: rgba(255,255,255,0.15);
-            padding: 10px 15px;
-            border-radius: 6px;
-            font-size: 13px;
-            display: inline-block;
-        }
-
-        /* ===== MEJORAS EN TARJETAS ===== */
-        .card {
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
             background: white;
-            border: 1px solid #e1e5eb;
             border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
             overflow: hidden;
         }
-
-        .card-header {
-            background: var(--primary-color);
+        
+        /* HEADER */
+        .header {
+            background: linear-gradient(135deg, #1e3a5c, #2d4a72);
             color: white;
-            padding: 15px 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding: 24px 30px;
+            border-bottom: 3px solid #4299e1;
         }
-
-        .card-title {
-            font-size: 16px;
+        
+        .header-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .header-title i {
+            font-size: 32px;
+            color: #63b3ed;
+        }
+        
+        .period-info {
+            background: rgba(255,255,255,0.15);
+            padding: 12px 18px;
+            border-radius: 6px;
+            font-size: 15px;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            border-left: 3px solid #4299e1;
+        }
+        
+        /* FILTERS */
+        .filters-container {
+            padding: 25px 30px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .filter-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        .filter-title {
+            font-size: 18px;
             font-weight: 600;
-            margin: 0;
+            color: #2d4a72;
+            margin-bottom: 20px;
             display: flex;
             align-items: center;
             gap: 10px;
         }
-
-        .card-body {
-            padding: 20px;
+        
+        .form-control {
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px 15px;
+            font-size: 14px;
+            transition: all 0.2s;
         }
-
-        /* ===== MEJORAS EN FORMULARIOS ===== */
-        .form-container {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid #e1e5eb;
+        
+        .form-control:focus {
+            border-color: #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
         }
-
-        .form-label {
+        
+        .btn {
+            padding: 12px 24px;
+            border-radius: 6px;
             font-weight: 600;
-            color: var(--primary-color);
-            margin-bottom: 8px;
+            font-size: 14px;
+            border: none;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #4299e1, #3182ce);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #3182ce, #2b6cb0);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(66, 153, 225, 0.2);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #48bb78, #38a169);
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: linear-gradient(135deg, #38a169, #2f855a);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(72, 187, 120, 0.2);
+        }
+        
+        /* MAIN CONTENT */
+        .content-container {
+            padding: 25px 30px;
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1e3a5c;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .section-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        /* TABLAS CON MISMO ESTILO */
+        .table-wrapper {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            overflow: auto;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        /* ESTILO ÚNICO PARA TODAS LAS TABLAS */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
             font-size: 13px;
         }
-
-        .form-control {
-            border: 2px solid #dee2e6;
-            border-radius: 6px;
-            padding: 10px 12px;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
-
-        .form-control:focus {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 0.2rem rgba(30, 58, 92, 0.25);
-        }
-
-        /* ===== MEJORAS EN BOTONES ===== */
-        .btn {
-            padding: 10px 20px;
-            border-radius: 6px;
-            font-weight: 500;
-            font-size: 14px;
-            transition: all 0.3s;
-            border: none;
-            cursor: pointer;
-        }
-
-        .btn-primary {
-            background: var(--primary-color);
+        
+        .data-table thead th {
+            background: #1e3a5c;
             color: white;
-        }
-
-        .btn-primary:hover {
-            background: var(--secondary-color);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-
-        .btn-success {
-            background: var(--success-color);
-            color: white;
-        }
-
-        .btn-success:hover {
-            background: #218838;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-
-        .btn-outline-secondary {
-            border: 2px solid #6c757d;
-            color: #6c757d;
-            background: transparent;
-        }
-
-        /* ===== MEJORAS EN TABLAS ===== */
-        .table-container {
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            border: 1px solid #e1e5eb;
-        }
-
-        .table-wrapper {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        table {
-            width: 100%;
-            min-width: 800px;
-            border-collapse: separate;
-            border-spacing: 0;
-        }
-
-        th {
-            background: var(--primary-color);
-            color: white;
-            padding: 12px 15px;
             font-weight: 600;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-bottom: 2px solid var(--secondary-color);
-            white-space: nowrap;
+            text-align: center;
+            padding: 14px 10px;
+            border: 1px solid #2d4a72;
             position: sticky;
             top: 0;
             z-index: 10;
+            white-space: nowrap;
         }
-
-        td {
-            padding: 12px 15px;
-            border-bottom: 1px solid #f0f0f0;
-            font-size: 13px;
+        
+        .data-table tbody td {
+            padding: 12px 10px;
+            border: 1px solid #e2e8f0;
+            text-align: center;
             vertical-align: middle;
         }
-
-        tr:hover {
-            background-color: #f8f9fa;
+        
+        /* Encabezados específicos por tabla */
+        .consumos-table thead th {
+            background: #1e3a5c !important;
+            border-color: #2d4a72 !important;
         }
-
-        tr:nth-child(even) {
-            background-color: #fafbfc;
+        
+        .complementos-table thead th {
+            background: #229954 !important;
+            border-color: #1e8449 !important;
         }
-
+        
+        .cancelaciones-table thead th {
+            background: #cb4335 !important;
+            border-color: #b03a2e !important;
+        }
+        
+        /* Filas alternas */
+        .data-table tbody tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+        
+        .data-table tbody tr:hover {
+            background-color: #edf2f7 !important;
+        }
+        
+        /* Columnas de montos alineadas a la derecha */
+        .monto-column {
+            text-align: right !important;
+            font-family: 'Courier New', monospace;
+            font-weight: 500;
+        }
+        
+        /* Columnas fijas para tabla principal */
         .fixed-column {
-            background: var(--secondary-color) !important;
+            background: #2d4a72 !important;
             color: white !important;
             font-weight: 600;
             position: sticky;
             left: 0;
             z-index: 5;
-            border-right: 2px solid var(--primary-color);
-        }
-
-        .money-cell {
-            font-family: 'Courier New', monospace;
-            font-weight: 600;
-            color: var(--success-color);
-            text-align: right;
+            border-right: 2px solid #1e3a5c;
         }
         
-        .complementos-cell {
-            background-color: #e8f5e8 !important;
-            color: var(--success-color) !important;
+        .fixed-column-header {
+            background: #1e3a5c !important;
+            color: white !important;
+            position: sticky;
+            left: 0;
+            z-index: 15;
+            border-right: 2px solid #2d4a72;
+        }
+        
+        /* Totales */
+        .data-table tfoot td {
+            background: #1e3a5c;
+            color: white;
             font-weight: 600;
+            padding: 14px 10px;
+            border: 1px solid #2d4a72;
             text-align: center;
         }
         
-        .cancelaciones-cell {
-            background-color: #ffeaea !important;
-            color: var(--danger-color) !important;
-            font-weight: 600;
-            text-align: center;
+        .complementos-table tfoot td {
+            background: #1e8449 !important;
+            border-color: #186a3b !important;
         }
-
-        /* ===== MEJORAS EN BADGES ===== */
-        .badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 12px;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
+        
+        .cancelaciones-table tfoot td {
+            background: #a93226 !important;
+            border-color: #922b21 !important;
         }
-
-        .badge-success {
-            background: #d4edda;
-            color: var(--success-color);
-            border: 1px solid #c3e6cb;
-        }
-
-        .badge-danger {
-            background: #f8d7da;
-            color: var(--danger-color);
-            border: 1px solid #f5c6cb;
-        }
-
-        .badge-warning {
-            background: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeaa7;
-        }
-
-        /* ===== MEJORAS EN ESTADÍSTICAS ===== */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
-        }
-
-        .stat-card {
-            background: white;
-            border: 1px solid #e1e5eb;
-            border-radius: 8px;
-            padding: 20px;
-            text-align: center;
-            transition: transform 0.3s;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.1);
-        }
-
-        .stat-icon {
-            font-size: 24px;
-            color: var(--primary-color);
-            margin-bottom: 10px;
-        }
-
-        .stat-value {
-            font-size: 28px;
-            font-weight: 700;
-            color: var(--primary-color);
-            margin-bottom: 5px;
-        }
-
-        .stat-label {
-            font-size: 12px;
-            color: #6c757d;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        /* ===== MEJORAS EN GRÁFICAS ===== */
-        .chart-container {
-            background: white;
-            border: 1px solid #e1e5eb;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-
-        .chart-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--primary-color);
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        /* ===== MEJORAS EN ACCIONES ===== */
+        
+        /* ACTIONS */
         .actions-container {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin: 20px 0;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
-        }
-
-        /* ===== MEJORAS EN FOOTER ===== */
-        .footer {
+            padding: 25px 30px;
+            background: #f8fafc;
+            border-top: 1px solid #e2e8f0;
             text-align: center;
-            padding: 20px;
-            color: #6c757d;
+        }
+        
+        /* FOOTER */
+        .footer {
+            padding: 20px 30px;
+            background: #1e3a5c;
+            color: #cbd5e0;
+            text-align: center;
             font-size: 13px;
-            border-top: 1px solid #e1e5eb;
-            margin-top: 30px;
+            border-top: 3px solid #4299e1;
         }
-
-        /* ===== MEJORAS EN RESPONSIVIDAD ===== */
+        
+        .footer strong {
+            color: white;
+        }
+        
+        /* RESPONSIVE */
         @media (max-width: 1200px) {
-            .container-fluid {
-                padding: 0 10px;
+            .container {
+                margin: 0 10px;
             }
             
-            .card-body {
-                padding: 15px;
-            }
-            
-            .stat-card {
-                padding: 15px;
+            .header-title {
+                font-size: 24px;
             }
         }
-
-        @media (max-width: 992px) {
+        
+        @media (max-width: 768px) {
             body {
                 padding: 10px;
-                font-size: 13px;
             }
             
-            .header-container {
-                padding: 15px;
-                margin-bottom: 20px;
+            .header {
+                padding: 20px;
             }
             
             .header-title {
                 font-size: 20px;
             }
             
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
+            .section-header {
+                flex-direction: column;
+                gap: 15px;
+                align-items: flex-start;
             }
             
-            .table-wrapper {
-                margin: 0 -10px;
-                padding: 0 10px;
+            .section-actions {
+                width: 100%;
             }
             
-            th, td {
-                padding: 10px 12px;
-                font-size: 12px;
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .filters-container,
+            .content-container {
+                padding: 20px;
             }
         }
-
-        @media (max-width: 768px) {
-            body {
-                padding: 8px;
-            }
-            
-            .header-container {
-                padding: 12px;
-            }
-            
+        
+        @media (max-width: 576px) {
             .header-title {
                 font-size: 18px;
             }
             
-            .card {
-                margin-bottom: 15px;
-            }
-            
-            .card-body {
-                padding: 12px;
-            }
-            
-            .card-title {
-                font-size: 14px;
-            }
-            
-            .form-control {
-                padding: 8px 10px;
-                font-size: 13px;
-            }
-            
-            .btn {
-                padding: 8px 16px;
-                font-size: 13px;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .stat-value {
-                font-size: 24px;
-            }
-            
-            th, td {
-                padding: 8px 10px;
-                font-size: 11px;
-            }
-            
-            .table-wrapper {
-                margin: 0 -8px;
-                padding: 0 8px;
-            }
-            
-            .badge {
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-        }
-
-        @media (max-width: 576px) {
-            .header-title {
-                font-size: 16px;
-            }
-            
-            .header-subtitle {
-                font-size: 12px;
-            }
-            
             .period-info {
-                font-size: 11px;
-                padding: 8px 12px;
-            }
-            
-            .actions-container {
-                flex-direction: column;
-            }
-            
-            .actions-container .btn {
-                width: 100%;
-                margin-bottom: 8px;
-            }
-            
-            .chart-container {
-                padding: 15px;
-            }
-            
-            .chart-title {
-                font-size: 14px;
-            }
-            
-            .footer {
-                padding: 15px;
-                font-size: 12px;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .container-fluid {
-                padding: 0 5px;
-            }
-            
-            body {
-                padding: 5px;
-            }
-            
-            .header-container {
+                font-size: 13px;
                 padding: 10px;
             }
             
-            .card-header {
-                padding: 12px 15px;
-            }
-            
-            .card-body {
-                padding: 10px;
-            }
-            
-            .form-container {
+            .filters-container,
+            .content-container {
                 padding: 15px;
             }
-            
-            th, td {
-                padding: 6px 8px;
-                font-size: 10px;
-            }
-            
-            .table-wrapper {
-                margin: 0 -5px;
-                padding: 0 5px;
-            }
-            
-            .stat-value {
-                font-size: 20px;
-            }
-            
-            .stat-label {
-                font-size: 10px;
-            }
         }
-
-        @media (max-width: 360px) {
-            .header-title {
-                font-size: 14px;
-            }
-            
-            .card-title {
-                font-size: 12px;
-            }
-            
-            .btn {
-                padding: 6px 12px;
-                font-size: 12px;
-            }
-            
-            th, td {
-                padding: 5px 6px;
-                font-size: 9px;
-            }
-        }
-
-        /* ===== MEJORAS EN SCROLLBAR ===== */
+        
+        /* SCROLLBAR */
         .table-wrapper::-webkit-scrollbar {
-            height: 8px;
-            width: 8px;
+            width: 10px;
+            height: 10px;
         }
-
+        
         .table-wrapper::-webkit-scrollbar-track {
             background: #f1f1f1;
             border-radius: 4px;
         }
-
+        
         .table-wrapper::-webkit-scrollbar-thumb {
-            background: var(--primary-color);
+            background: #cbd5e0;
             border-radius: 4px;
         }
-
+        
         .table-wrapper::-webkit-scrollbar-thumb:hover {
-            background: var(--secondary-color);
+            background: #a0aec0;
         }
-
-        /* ===== MEJORAS EN ANIMACIONES ===== */
-        .fade-in {
-            animation: fadeIn 0.5s ease-in;
+        
+        /* ESTILOS ESPECIALES PARA COLUMNAS */
+        .column-id {
+            width: 70px;
         }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        /* ===== MEJORAS EN ESTADOS ===== */
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #6c757d;
-        }
-
-        .no-data {
-            text-align: center;
-            padding: 40px;
-            color: #6c757d;
-            font-size: 14px;
-        }
-
-        .no-data i {
-            font-size: 48px;
-            margin-bottom: 15px;
-            color: #adb5bd;
-        }
-
-        /* ===== MEJORAS EN TAMAÑOS DE FUENTE ===== */
-        .text-sm {
-            font-size: 12px !important;
-        }
-
-        .text-xs {
-            font-size: 11px !important;
-        }
-
-        .text-lg {
-            font-size: 16px !important;
-        }
-
-        .text-xl {
-            font-size: 18px !important;
-        }
-
-        /* ===== MEJORAS EN ESPACIADO ===== */
-        .p-sm {
-            padding: 10px !important;
-        }
-
-        .p-md {
-            padding: 15px !important;
-        }
-
-        .p-lg {
-            padding: 20px !important;
-        }
-
-        .m-sm {
-            margin: 5px !important;
-        }
-
-        .m-md {
-            margin: 10px !important;
-        }
-
-        .m-lg {
-            margin: 15px !important;
-        }
-
-        /* ===== MEJORAS EN ALINEACIÓN ===== */
-        .text-left {
+        
+        .column-nombre {
+            width: 250px;
             text-align: left !important;
         }
-
-        .text-center {
-            text-align: center !important;
-        }
-
-        .text-right {
-            text-align: right !important;
-        }
-
-        /* ===== MEJORAS EN VISIBILIDAD ===== */
-        .d-block-mobile {
-            display: block !important;
-        }
-
-        .d-none-mobile {
-            display: none !important;
-        }
-
-        @media (min-width: 768px) {
-            .d-block-mobile {
-                display: none !important;
-            }
-            
-            .d-none-mobile {
-                display: block !important;
-            }
-        }
-
-        /* ===== MEJORAS EN BORDES ===== */
-        .border-light {
-            border-color: #e1e5eb !important;
-        }
-
-        .border-primary {
-            border-color: var(--primary-color) !important;
-        }
-
-        /* ===== MEJORAS EN SOMBRAS ===== */
-        .shadow-sm {
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05) !important;
-        }
-
-        .shadow-md {
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1) !important;
-        }
-
-        .shadow-lg {
-            box-shadow: 0 8px 16px rgba(0,0,0,0.15) !important;
-        }
-
-        /* ===== MEJORAS EN FONDOS ===== */
-        .bg-light {
-            background-color: #f8f9fa !important;
-        }
-
-        .bg-lighter {
-            background-color: #fafbfc !important;
+        
+        .column-monto {
+            width: 120px;
         }
         
-        /* ===== ESTILOS ESPECIALES PARA NUEVAS COLUMNAS ===== */
-        .th-complementos {
-            background: var(--success-color) !important;
+        .column-total {
+            width: 100px;
+            font-weight: 600;
         }
         
-        .th-cancelaciones {
-            background: var(--danger-color) !important;
+        .column-fecha {
+            width: 90px;
         }
         
-        .highlight-complementos {
-            background: linear-gradient(135deg, #d4edda, #e8f5e8) !important;
-            color: var(--success-color) !important;
-            font-weight: 700;
-            border-left: 3px solid var(--success-color) !important;
-        }
-        
-        .highlight-cancelaciones {
-            background: linear-gradient(135deg, #f8d7da, #ffeaea) !important;
-            color: var(--danger-color) !important;
-            font-weight: 700;
-            border-left: 3px solid var(--danger-color) !important;
-        }
-        
-        .icon-complementos {
-            color: var(--success-color);
-        }
-        
-        .icon-cancelaciones {
-            color: var(--danger-color);
-        }
-        
-        /* ===== MEJORAS EN HOVER PARA NUEVAS COLUMNAS ===== */
-        tr:hover .highlight-complementos {
-            background: linear-gradient(135deg, #c3e6cb, #d4edda) !important;
-        }
-        
-        tr:hover .highlight-cancelaciones {
-            background: linear-gradient(135deg, #f5c6cb, #f8d7da) !important;
+        .column-cantidad {
+            width: 80px;
         }
     </style>
 </head>
 <body>
-    <div class="container-fluid">
-        <!-- Encabezado Mejorado -->
-        <header class="header-container fade-in">
-            <div class="row align-items-center">
-                <div class="col-md-8">
-                    <h1 class="header-title">
-                        <i class="fas fa-utensils me-2"></i>
-                        Reporte de Comedor
-                    </h1>
-                    <p class="header-subtitle">
-                        Sistema de seguimiento y análisis de consumos, complementos y cancelaciones
-                    </p>
-                </div>
-                <div class="col-md-4 text-md-end">
-                    <div class="period-info">
-                        <i class="fas fa-calendar-alt me-2"></i>
-                        <?php echo date('d/m/Y', strtotime($fechaInicio)); ?> - <?php echo date('d/m/Y', strtotime($fechaFin)); ?>
-                    </div>
-                </div>
+    <div class="container">
+        <!-- HEADER -->
+        <div class="header">
+            <div class="header-title">
+                <i class="fas fa-utensils"></i>
+                REPORTE DE COMEDOR - SISTEMA DE CONSUMOS
             </div>
-        </header>
+            <div class="period-info">
+                <i class="fas fa-calendar-alt"></i>
+                <strong>PERÍODO:</strong> 
+                <?php echo date('d/m/Y', strtotime($fechaInicio)); ?> - <?php echo date('d/m/Y', strtotime($fechaFin)); ?>
+            </div>
+        </div>
 
-        <!-- Filtros Mejorados -->
-        <div class="card fade-in">
-            <div class="card-header">
-                <h2 class="card-title">
-                    <i class="fas fa-filter me-2"></i>
-                    Configurar Reporte
-                </h2>
-            </div>
-            <div class="card-body">
+        <!-- FILTROS -->
+        <div class="filters-container">
+            <div class="filter-card">
+                <div class="filter-title">
+                    <i class="fas fa-filter"></i>
+                    CONFIGURAR REPORTE
+                </div>
                 <form method="GET" action="" class="row g-3">
-                    <div class="col-md-5">
-                        <label for="fechaInicio" class="form-label">
-                            <i class="fas fa-calendar-plus me-2"></i> Fecha de Inicio
-                        </label>
+                    <div class="col-lg-4 col-md-6">
+                        <label for="fechaInicio" class="form-label">Fecha de Inicio</label>
                         <input type="date" class="form-control" id="fechaInicio" name="fechaInicio" 
                                value="<?php echo htmlspecialchars($fechaInicio); ?>" required>
                     </div>
-                    <div class="col-md-5">
-                        <label for="fechaFin" class="form-label">
-                            <i class="fas fa-calendar-check me-2"></i> Fecha de Fin
-                        </label>
+                    <div class="col-lg-4 col-md-6">
+                        <label for="fechaFin" class="form-label">Fecha de Fin</label>
                         <input type="date" class="form-control" id="fechaFin" name="fechaFin" 
                                value="<?php echo htmlspecialchars($fechaFin); ?>" required>
                     </div>
-                    <div class="col-md-2 d-flex align-items-end">
+                    <div class="col-lg-4 col-md-12 d-flex align-items-end">
                         <button type="submit" class="btn btn-primary w-100">
-                            <i class="fas fa-search me-2"></i> Filtrar
+                            <i class="fas fa-search"></i> GENERAR REPORTE
                         </button>
                     </div>
                 </form>
             </div>
         </div>
 
-        <!-- Loading State -->
-        <div class="loading card" id="loading" style="display: none;">
-            <div class="spinner-border text-primary mb-3" role="status">
-                <span class="visually-hidden">Cargando...</span>
-            </div>
-            <p class="mb-0">Procesando datos, por favor espere...</p>
-        </div>
-
         <?php if ($stmt && count($rows) > 0): ?>
-            <!-- Resumen Ejecutivo Mejorado -->
-            <div class="card fade-in">
-                <div class="card-header">
-                    <h2 class="card-title">
-                        <i class="fas fa-chart-pie me-2"></i>
-                        Resumen Ejecutivo
-                    </h2>
-                </div>
-                <div class="card-body">
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-users"></i></div>
-                            <div class="stat-value"><?php echo number_format($totalEmpleados); ?></div>
-                            <div class="stat-label">Total Empleados</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-utensils"></i></div>
-                            <div class="stat-value"><?php echo number_format($totalConsumos); ?></div>
-                            <div class="stat-label">Total Consumos</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-door-open"></i></div>
-                            <div class="stat-value"><?php echo number_format($totalEntradas); ?></div>
-                            <div class="stat-label">Total Entradas</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-coffee"></i></div>
-                            <div class="stat-value"><?php echo number_format($totalComplementos); ?></div>
-                            <div class="stat-label">Complementos</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-times-circle"></i></div>
-                            <div class="stat-value"><?php echo number_format($totalCancelaciones); ?></div>
-                            <div class="stat-label">Cancelaciones</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-dollar-sign"></i></div>
-                            <div class="stat-value">$<?php echo number_format($montoTotalConsumos + $montoTotalEntradas, 0); ?></div>
-                            <div class="stat-label">Monto Total</div>
-                        </div>
+            <!-- TABLA PRINCIPAL - CONSUMOS -->
+            <div class="content-container">
+                <div class="section-header">
+                    <div class="section-title">
+                        <i class="fas fa-table"></i>
+                        REGISTRO DETALLADO DE CONSUMOS
                     </div>
-                </div>
-            </div>
-
-            <!-- Tabla Principal Mejorada CON NUEVAS COLUMNAS -->
-            <div class="card fade-in">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h2 class="card-title mb-0">
-                        <i class="fas fa-table me-2"></i>
-                        Registro Detallado de Consumos
-                        <span class="badge bg-success ms-2">Nuevo: Complementos y Cancelaciones</span>
-                    </h2>
-                    <div>
+                    <div class="section-actions">
                         <a href="?fechaInicio=<?php echo $fechaInicio; ?>&fechaFin=<?php echo $fechaFin; ?>&exportar=excel" 
-                           class="btn btn-success btn-sm">
-                            <i class="fas fa-file-excel me-2"></i> Excel
+                           class="btn btn-success">
+                            <i class="fas fa-file-excel"></i> EXPORTAR EXCEL
                         </a>
-                        <button class="btn btn-primary btn-sm ms-2" onclick="window.print()">
-                            <i class="fas fa-print me-2"></i> Imprimir
+                        <button class="btn btn-primary" onclick="window.print()">
+                            <i class="fas fa-print"></i> IMPRIMIR
                         </button>
                     </div>
                 </div>
-                <div class="card-body p-0">
-                    <div class="table-container">
-                        <div class="table-wrapper">
-                            <table id="tablaPrincipal" class="display stripe row-border" style="width:100%">
-                                <thead>
-                                    <tr>
-                                        <th class="fixed-column">ID</th>
-                                        <th class="fixed-column">Nombre del Empleado</th>
-                                        <?php
-                                        if (count($rows) > 0) {
-                                            $firstRow = $rows[0];
-                                            foreach ($firstRow as $col => $val) {
-                                                if (!in_array($col, ['Id_Empleado', 'Nombre', 'Empleado', 'NombreEntradas'])) {
-                                                    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $col)) {
-                                                        // Aplicar clases especiales para las nuevas columnas
-                                                        if ($col === 'TotalComplementos') {
-                                                            echo '<th class="th-complementos"><i class="fas fa-coffee me-2"></i>' . htmlspecialchars($col) . '</th>';
-                                                        } elseif ($col === 'TotalCancelaciones') {
-                                                            echo '<th class="th-cancelaciones"><i class="fas fa-times-circle me-2"></i>' . htmlspecialchars($col) . '</th>';
-                                                        } else {
-                                                            echo '<th>' . htmlspecialchars($col) . '</th>';
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        ?>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($rows as $row): ?>
-                                        <tr>
-                                            <td class="fixed-column"><?php echo htmlspecialchars($row['Id_Empleado']); ?></td>
-                                            <td class="fixed-column"><?php echo htmlspecialchars($row['Nombre']); ?></td>
+                
+                <div class="table-wrapper">
+                    <table id="tablaConsumos" class="data-table consumos-table">
+                        <thead>
+                            <tr>
+                                <?php
+                                if (count($rows) > 0) {
+                                    $firstRow = $rows[0];
+                                    $colIndex = 0;
+                                    foreach ($firstRow as $col => $val) {
+                                        if (!in_array($col, ['Empleado', 'NombreEntradas'])) {
+                                            $widthClass = '';
+                                            $alignClass = 'text-center';
+                                            $fixedClass = '';
                                             
-                                            <?php foreach ($row as $col => $val): ?>
-                                                <?php if (in_array($col, ['Id_Empleado', 'Nombre', 'Empleado', 'NombreEntradas'])) continue; ?>
-                                                <?php if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $col)): ?>
-                                                    <?php if ($col === 'MontoConsumos' || $col === 'MontoEntradas'): ?>
-                                                        <td class="money-cell">$<?php echo number_format($val, 2); ?></td>
-                                                    <?php elseif ($col === 'TotalComplementos'): ?>
-                                                        <td class="highlight-complementos text-center">
-                                                            <i class="fas fa-coffee icon-complementos me-2"></i>
-                                                            <strong><?php echo htmlspecialchars($val); ?></strong>
-                                                        </td>
-                                                    <?php elseif ($col === 'TotalCancelaciones'): ?>
-                                                        <td class="highlight-cancelaciones text-center">
-                                                            <i class="fas fa-times-circle icon-cancelaciones me-2"></i>
-                                                            <strong><?php echo htmlspecialchars($val); ?></strong>
-                                                        </td>
-                                                    <?php else: ?>
-                                                        <td><?php echo htmlspecialchars($val); ?></td>
-                                                    <?php endif; ?>
-                                                <?php endif; ?>
-                                            <?php endforeach; ?>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                                <tfoot>
-                                    <tr>
-                                        <th colspan="2" class="text-end">TOTALES:</th>
-                                        <?php
-                                        // Calcular totales por columna
-                                        $columnTotals = [];
-                                        foreach ($rows as $row) {
-                                            foreach ($row as $col => $val) {
-                                                if (!in_array($col, ['Id_Empleado', 'Nombre', 'Empleado', 'NombreEntradas']) && 
-                                                    !preg_match('/^\d{4}-\d{2}-\d{2}$/', $col)) {
-                                                    if (!isset($columnTotals[$col])) {
-                                                        $columnTotals[$col] = 0;
-                                                    }
-                                                    if (is_numeric($val)) {
-                                                        $columnTotals[$col] += $val;
-                                                    }
-                                                }
+                                            // Determinar clases específicas por columna
+                                            if ($col === 'Id_Empleado') {
+                                                $widthClass = 'column-id';
+                                                $fixedClass = 'fixed-column-header';
+                                            } elseif ($col === 'Nombre') {
+                                                $widthClass = 'column-nombre';
+                                                $alignClass = 'text-left';
+                                                $fixedClass = 'fixed-column-header';
+                                            } elseif (strpos($col, 'Monto') === 0) {
+                                                $widthClass = 'column-monto';
+                                                $alignClass = 'text-right';
+                                            } elseif (strpos($col, 'Total') === 0) {
+                                                $widthClass = 'column-total';
                                             }
+                                            
+                                            // Nombre corto para encabezados
+                                            $displayName = $col;
+                                            if ($col === 'TotalConsumos') $displayName = 'TOTAL CONSUMOS';
+                                            elseif ($col === 'TotalConsumosDesayunos') $displayName = 'CONS. DESAYUNOS';
+                                            elseif ($col === 'TotalConsumosComidas') $displayName = 'CONS. COMIDAS';
+                                            elseif ($col === 'MontoConsumosDesayunos') $displayName = 'MONTO CONS. DESAY.';
+                                            elseif ($col === 'MontoConsumosComidas') $displayName = 'MONTO CONS. COMIDA';
+                                            elseif ($col === 'MontoConsumos') $displayName = 'MONTO TOTAL CONS.';
+                                            elseif ($col === 'TotalEntradas') $displayName = 'TOTAL ENTRADAS';
+                                            elseif ($col === 'TotalDesayunos') $displayName = 'ENTR. DESAYUNOS';
+                                            elseif ($col === 'TotalComidas') $displayName = 'ENTR. COMIDAS';
+                                            elseif ($col === 'MontoEntradasDesayunos') $displayName = 'MONTO ENTR. DESAY.';
+                                            elseif ($col === 'MontoEntradasComidas') $displayName = 'MONTO ENTR. COMIDA';
+                                            elseif ($col === 'MontoEntradasTotal') $displayName = 'MONTO TOTAL ENTR.';
+                                            elseif ($col === 'DIFCONSUENTRADAS') $displayName = 'DIF. CONS-ENTR';
+                                            elseif ($col === 'MontoQueNosetomo') $displayName = 'MONTO NO TOMADO';
+                                            elseif ($col === 'MontoCancelaciones') $displayName = 'MONTO CANCELACIONES';
+                                            elseif ($col === 'MontoFinalque') $displayName = 'MONTO FINAL (x2)';
+                                            elseif ($col === 'MontoFinalDescontar') $displayName = 'TOTAL A DESCONTAR';
+                                            
+                                            echo '<th class="' . $fixedClass . ' ' . $widthClass . ' ' . $alignClass . '">' . $displayName . '</th>';
+                                            $colIndex++;
                                         }
+                                    }
+                                }
+                                ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($rows as $row): ?>
+                                <tr>
+                                    <?php foreach ($row as $col => $val): ?>
+                                        <?php if (in_array($col, ['Empleado', 'NombreEntradas'])) continue; ?>
                                         
-                                        // Mostrar totales
-                                        foreach ($columnTotals as $col => $total) {
-                                            if ($col === 'MontoConsumos' || $col === 'MontoEntradas') {
-                                                echo '<th class="money-cell">$' . number_format($total, 2) . '</th>';
-                                            } elseif ($col === 'TotalComplementos') {
-                                                echo '<th class="highlight-complementos text-center">' . number_format($total) . '</th>';
-                                            } elseif ($col === 'TotalCancelaciones') {
-                                                echo '<th class="highlight-cancelaciones text-center">' . number_format($total) . '</th>';
-                                            } elseif ($col === 'TotalConsumos' || $col === 'TotalEntradas') {
-                                                echo '<th class="text-center fw-bold">' . number_format($total) . '</th>';
-                                            } else {
-                                                echo '<th class="text-center">' . (is_numeric($total) ? number_format($total) : '-') . '</th>';
-                                            }
+                                        <?php
+                                        $widthClass = '';
+                                        $alignClass = 'text-center';
+                                        $fixedClass = '';
+                                        $displayVal = $val;
+                                        
+                                        // Determinar clases específicas por columna
+                                        if ($col === 'Id_Empleado') {
+                                            $widthClass = 'column-id';
+                                            $fixedClass = 'fixed-column';
+                                        } elseif ($col === 'Nombre') {
+                                            $widthClass = 'column-nombre';
+                                            $alignClass = 'text-left';
+                                            $fixedClass = 'fixed-column';
+                                        } elseif (strpos($col, 'Monto') === 0) {
+                                            $widthClass = 'column-monto';
+                                            $alignClass = 'text-right monto-column';
+                                            $displayVal = '$' . number_format($val, 2);
+                                        } elseif (strpos($col, 'Total') === 0) {
+                                            $widthClass = 'column-total';
                                         }
                                         ?>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                        </div>
-                    </div>
+                                        <td class="<?php echo $fixedClass . ' ' . $widthClass . ' ' . $alignClass; ?>">
+                                            <?php echo htmlspecialchars($displayVal); ?>
+                                        </td>
+                                    <?php endforeach; ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <!-- Complementos Mejorados -->
+            <!-- COMPLEMENTOS -->
             <?php if (count($complementosData) > 0): ?>
-            <div class="card fade-in">
-                <div class="card-header">
-                    <h2 class="card-title">
-                        <i class="fas fa-coffee me-2"></i>
-                        Reporte Detallado de Complementos
-                    </h2>
+            <div class="content-container">
+                <div class="section-header">
+                    <div class="section-title">
+                        <i class="fas fa-coffee"></i>
+                        REPORTE DE COMPLEMENTOS
+                    </div>
                 </div>
-                <div class="card-body">
-                    <div class="row mb-4">
-                        <?php foreach ($resumenComplementos as $key => $value): ?>
-                        <div class="col-md-3 col-sm-6 mb-3">
-                            <div class="stat-card">
-                                <div class="stat-icon">
-                                    <?php if ($key === 'CAFÉ O TÉ'): ?>
-                                        <i class="fas fa-mug-hot"></i>
-                                    <?php elseif ($key === 'TORTILLAS'): ?>
-                                        <i class="fas fa-bread-slice"></i>
-                                    <?php elseif ($key === 'AGUA'): ?>
-                                        <i class="fas fa-tint"></i>
-                                    <?php else: ?>
-                                        <i class="fas fa-trash"></i>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="stat-value"><?php echo number_format($value); ?></div>
-                                <div class="stat-label"><?php echo $key; ?></div>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                    
-                    <div class="table-container">
-                        <div class="table-wrapper">
-                            <table id="tablaComplementos" class="table">
-                                <thead>
-                                    <tr>
-                                        <th>Nombre del Empleado</th>
-                                        <th>CAFÉ O TÉ</th>
-                                        <th>TORTILLAS</th>
-                                        <th>AGUA</th>
-                                        <th>DESECHABLE</th>
-                                        <th>Total</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($complementosData as $complemento): 
-                                        $total = $complemento['CAFÉ O TÉ'] + $complemento['TORTILLAS'] + $complemento['AGUA'] + $complemento['DESECHABLE'];
-                                    ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars($complemento['Nombre']); ?></td>
-                                            <td class="text-center">
-                                                <span class="badge badge-warning"><?php echo $complemento['CAFÉ O TÉ']; ?></span>
-                                            </td>
-                                            <td class="text-center">
-                                                <span class="badge badge-warning"><?php echo $complemento['TORTILLAS']; ?></span>
-                                            </td>
-                                            <td class="text-center">
-                                                <span class="badge badge-warning"><?php echo $complemento['AGUA']; ?></span>
-                                            </td>
-                                            <td class="text-center">
-                                                <span class="badge badge-warning"><?php echo $complemento['DESECHABLE']; ?></span>
-                                            </td>
-                                            <td class="text-center">
-                                                <span class="badge badge-success"><?php echo $total; ?></span>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                                <tfoot>
-                                    <tr>
-                                        <th class="text-end">TOTALES:</th>
-                                        <th class="text-center"><?php echo number_format($resumenComplementos['CAFÉ O TÉ']); ?></th>
-                                        <th class="text-center"><?php echo number_format($resumenComplementos['TORTILLAS']); ?></th>
-                                        <th class="text-center"><?php echo number_format($resumenComplementos['AGUA']); ?></th>
-                                        <th class="text-center"><?php echo number_format($resumenComplementos['DESECHABLE']); ?></th>
-                                        <th class="text-center"><?php echo number_format($totalComplementos); ?></th>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                        </div>
-                    </div>
+                
+                <div class="table-wrapper">
+                    <table id="tablaComplementos" class="data-table complementos-table">
+                        <thead>
+                            <tr>
+                                <th class="text-left column-nombre">NOMBRE DEL EMPLEADO</th>
+                                <th class="column-cantidad">CAFÉ O TÉ</th>
+                                <th class="column-cantidad">TORTILLAS</th>
+                                <th class="column-cantidad">AGUA</th>
+                                <th class="column-cantidad">DESECHABLE</th>
+                                <th class="column-total">TOTAL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($complementosData as $complemento): 
+                                $total = $complemento['CAFÉ O TÉ'] + $complemento['TORTILLAS'] + $complemento['AGUA'] + $complemento['DESECHABLE'];
+                            ?>
+                                <tr>
+                                    <td class="text-left column-nombre"><?php echo htmlspecialchars($complemento['Nombre']); ?></td>
+                                    <td class="column-cantidad"><?php echo $complemento['CAFÉ O TÉ']; ?></td>
+                                    <td class="column-cantidad"><?php echo $complemento['TORTILLAS']; ?></td>
+                                    <td class="column-cantidad"><?php echo $complemento['AGUA']; ?></td>
+                                    <td class="column-cantidad"><?php echo $complemento['DESECHABLE']; ?></td>
+                                    <td class="column-total" style="font-weight:bold;"><?php echo $total; ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td class="text-right" style="font-weight:bold;">TOTALES:</td>
+                                <td><?php echo number_format($resumenComplementos['CAFÉ O TÉ']); ?></td>
+                                <td><?php echo number_format($resumenComplementos['TORTILLAS']); ?></td>
+                                <td><?php echo number_format($resumenComplementos['AGUA']); ?></td>
+                                <td><?php echo number_format($resumenComplementos['DESECHABLE']); ?></td>
+                                <td><?php echo number_format($totalComplementos); ?></td>
+                            </tr>
+                        </tfoot>
+                    </table>
                 </div>
             </div>
             <?php endif; ?>
 
-            <!-- Cancelaciones Mejoradas -->
+            <!-- CANCELACIONES -->
             <?php if (count($cancelacionesData) > 0): ?>
-            <div class="card fade-in">
-                <div class="card-header">
-                    <h2 class="card-title">
-                        <i class="fas fa-times-circle me-2"></i>
-                        Reporte Detallado de Cancelaciones
-                    </h2>
+            <div class="content-container">
+                <div class="section-header">
+                    <div class="section-title">
+                        <i class="fas fa-ban"></i>
+                        REPORTE DE CANCELACIONES (SOLO APROBADAS)
+                    </div>
                 </div>
-                <div class="card-body">
-                    <div class="row mb-4">
-                        <div class="col-md-3 col-sm-6 mb-3">
-                            <div class="stat-card">
-                                <div class="stat-icon"><i class="fas fa-ban"></i></div>
-                                <div class="stat-value"><?php echo number_format($totalCancelaciones); ?></div>
-                                <div class="stat-label">Total Cancelaciones</div>
-                            </div>
-                        </div>
-                        
-                        <div class="col-md-3 col-sm-6 mb-3">
-                            <div class="stat-card">
-                                <div class="stat-icon"><i class="fas fa-users"></i></div>
-                                <div class="stat-value"><?php echo number_format(count($cancelacionesData)); ?></div>
-                                <div class="stat-label">Empleados</div>
-                            </div>
-                        </div>
-                        
-                        <div class="col-md-3 col-sm-6 mb-3">
-                            <div class="stat-card">
-                                <div class="stat-icon"><i class="fas fa-calculator"></i></div>
-                                <div class="stat-value"><?php echo number_format($totalCancelaciones > 0 ? $totalCancelaciones / count($cancelacionesData) : 0, 1); ?></div>
-                                <div class="stat-label">Promedio</div>
-                            </div>
-                        </div>
-                        
-                        <div class="col-md-3 col-sm-6 mb-3">
-                            <div class="stat-card">
-                                <div class="stat-icon"><i class="fas fa-chart-line"></i></div>
-                                <div class="stat-value"><?php echo number_format($cancelacionesData[0]['Total'] ?? 0); ?></div>
-                                <div class="stat-label">Máximo</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="table-container">
-                        <div class="table-wrapper">
-                            <table id="tablaCancelaciones" class="table">
-                                <thead>
-                                    <tr>
-                                        <th>Nombre del Empleado</th>
-                                        <th>Total Cancelaciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($cancelacionesData as $cancelacion): ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars($cancelacion['Nombre']); ?></td>
-                                            <td class="text-center">
-                                                <span class="badge badge-danger">
-                                                    <i class="fas fa-ban me-1"></i>
-                                                    <?php echo $cancelacion['Total']; ?>
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                                <tfoot>
-                                    <tr>
-                                        <th class="text-end">TOTAL:</th>
-                                        <th class="text-center"><?php echo number_format($totalCancelaciones); ?></th>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                        </div>
-                    </div>
+                
+                <div class="table-wrapper">
+                    <table id="tablaCancelaciones" class="data-table cancelaciones-table">
+                        <thead>
+                            <tr>
+                                <th class="text-left column-nombre">NOMBRE DEL EMPLEADO</th>
+                                <th class="column-cantidad">TIPO CONSUMO</th>
+                                <th class="column-fecha">FECHA</th>
+                                <th class="column-cantidad">CANTIDAD</th>
+                                <th>TARIFA</th>
+                                <th class="column-monto">MONTO</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($cancelacionesData as $cancelacion): 
+                                $fecha = $cancelacion['FechaStr'] ?? 'Fecha no disponible';
+                                $tipo = $cancelacion['Tipo_Consumo'];
+                                $cantidad = $cancelacion['Total'];
+                                $montoUnitario = $cancelacion['MontoUnitario'] ?? 0;
+                                $montoTotal = $cancelacion['MontoTotal'] ?? 0;
+                                $anio = $cancelacion['Anio'] ?? 0;
+                                $tipoNormalizado = $cancelacion['TipoNormalizado'] ?? '';
+                                $es2026OMayor = ($anio >= 2026);
+                                
+                                if ($es2026OMayor) {
+                                    if (strpos($tipoNormalizado, 'desayuno') !== false) {
+                                        $tarifaTexto = '$35 (2026+ Desayuno)';
+                                    } elseif (strpos($tipoNormalizado, 'comida') !== false) {
+                                        $tarifaTexto = '$45 (2026+ Comida)';
+                                    } elseif (strpos($tipoNormalizado, 'ambos') !== false) {
+                                        $tarifaTexto = '$80 (2026+ Ambos)';
+                                    } else {
+                                        $tarifaTexto = '$' . $montoUnitario . ' (2026+)';
+                                    }
+                                } else {
+                                    if (strpos($tipoNormalizado, 'desayuno') !== false || strpos($tipoNormalizado, 'comida') !== false) {
+                                        $tarifaTexto = '$30 (Antes 2026)';
+                                    } elseif (strpos($tipoNormalizado, 'ambos') !== false) {
+                                        $tarifaTexto = '$60 (Antes 2026 Ambos)';
+                                    } else {
+                                        $tarifaTexto = '$' . $montoUnitario . ' (Antes 2026)';
+                                    }
+                                }
+                            ?>
+                                <tr>
+                                    <td class="text-left column-nombre"><?php echo htmlspecialchars($cancelacion['Nombre']); ?></td>
+                                    <td class="column-cantidad"><?php echo $tipo; ?></td>
+                                    <td class="column-fecha"><?php echo $fecha; ?></td>
+                                    <td class="column-cantidad" style="font-weight:bold;"><?php echo $cantidad; ?></td>
+                                    <td><?php echo $tarifaTexto; ?></td>
+                                    <td class="column-monto monto-column" style="font-weight:bold;">$<?php echo number_format($montoTotal, 2); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="3" class="text-right" style="font-weight:bold;">TOTALES:</td>
+                                <td><?php echo number_format($totalCancelaciones); ?></td>
+                                <td>-</td>
+                                <td>$<?php echo number_format($montoTotalCancelaciones, 2); ?></td>
+                            </tr>
+                        </tfoot>
+                    </table>
                 </div>
             </div>
             <?php endif; ?>
 
-            <!-- Acciones Finales -->
-            <div class="actions-container fade-in">
+            <!-- ACCIONES -->
+            <div class="actions-container">
                 <a href="?fechaInicio=<?php echo $fechaInicio; ?>&fechaFin=<?php echo $fechaFin; ?>&exportar=excel" 
-                   class="btn btn-success">
-                    <i class="fas fa-file-excel me-2"></i> Exportar a Excel Completo
+                   class="btn btn-success" style="min-width: 250px;">
+                    <i class="fas fa-file-excel"></i> EXPORTAR REPORTE COMPLETO (.XLS)
                 </a>
-                <button class="btn btn-primary" onclick="window.print()">
-                    <i class="fas fa-print me-2"></i> Imprimir Reporte Completo
-                </button>
-                <button class="btn btn-outline-secondary" onclick="window.location.reload()">
-                    <i class="fas fa-redo me-2"></i> Actualizar Vista
-                </button>
-                <button class="btn btn-outline-secondary" onclick="scrollToTop()">
-                    <i class="fas fa-arrow-up me-2"></i> Ir al Inicio
-                </button>
             </div>
 
         <?php elseif ($stmt): ?>
-            <!-- Estado Sin Datos -->
-            <div class="card">
-                <div class="card-body">
-                    <div class="no-data">
-                        <i class="fas fa-inbox"></i>
-                        <h4 class="mt-3">No hay datos disponibles</h4>
-                        <p class="mb-0">No se encontraron registros para el rango de fechas seleccionado.</p>
-                    </div>
+            <!-- SIN DATOS -->
+            <div class="content-container">
+                <div class="text-center py-5">
+                    <i class="fas fa-inbox fa-3x text-muted mb-4"></i>
+                    <h4 class="mb-3">NO HAY DATOS DISPONIBLES</h4>
+                    <p class="text-muted">No se encontraron registros para el rango de fechas seleccionado.</p>
                 </div>
             </div>
         <?php endif; ?>
         
-        <!-- Footer Mejorado -->
-        <footer class="footer">
-            <div class="container-fluid">
-                <div class="row">
-                    <div class="col-md-6">
-                        <p class="mb-1">
-                            <i class="fas fa-shield-alt me-2"></i>
-                            Sistema de Reportes - Comedor Corporativo
-                        </p>
-                    </div>
-                    <div class="col-md-6 text-md-end">
-                        <p class="mb-1">
-                            <i class="fas fa-calendar-alt me-2"></i>
-                            Generado: <?php echo date('d/m/Y H:i'); ?> 
-                        </p>
-                        <p class="mb-0 text-sm">
-                            © <?php echo date('Y'); ?> • 
-                            <span class="text-primary">v3.1</span>
-                            <span class="badge bg-success ms-2">Nuevo: Columnas agregadas</span>
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </footer>
+        <!-- FOOTER -->
+        <div class="footer">
+            <p class="mb-2">
+                <strong>SISTEMA DE REPORTES - COMEDOR CORPORATIVO</strong>
+            </p>
+            <p class="mb-0">
+                <i class="fas fa-clock"></i> Generado: <?php echo date('d/m/Y H:i:s'); ?>
+            </p>
+        </div>
     </div>
 
     <script>
-        // Inicialización
         $(document).ready(function() {
-            // Mostrar loading al enviar formulario
-            $('#filterForm').on('submit', function() {
-                $('#loading').fadeIn();
-            });
-            
-            // Inicializar DataTables con configuración mejorada
-            $('#tablaPrincipal').DataTable({
+            // Inicializar DataTables para tabla principal con scroll horizontal
+            var tableConsumos = $('#tablaConsumos').DataTable({
                 language: {
                     url: "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json"
                 },
                 pageLength: 25,
                 lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "Todos"]],
                 order: [[0, 'asc']],
-                responsive: false,
                 scrollX: true,
-                autoWidth: false,
+                scrollY: '500px',
                 scrollCollapse: true,
                 fixedColumns: {
                     leftColumns: 2
                 },
+                dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>' +
+                     '<"row"<"col-sm-12"tr>>' +
+                     '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>',
                 columnDefs: [
-                    { width: "80px", targets: 0 },
-                    { width: "200px", targets: 1 },
-                    { className: "dt-center", targets: "_all" }
+                    {
+                        targets: '_all',
+                        className: 'dt-center'
+                    },
+                    {
+                        targets: [1], // Columna Nombre
+                        className: 'dt-left'
+                    }
                 ],
                 initComplete: function() {
-                    // Ajustar tabla en móviles
-                    if ($(window).width() < 768) {
-                        $('.dataTables_scrollHead').css('overflow-x', 'auto');
-                    }
+                    // Ajustar ancho de columnas
+                    this.api().columns.adjust();
                     
-                    // Resaltar las nuevas columnas
-                    $('th.th-complementos, th.th-cancelaciones').addClass('text-white');
-                    
-                    // Agregar tooltips a las nuevas columnas
-                    $('th.th-complementos').attr('title', 'Total de complementos solicitados');
-                    $('th.th-cancelaciones').attr('title', 'Total de cancelaciones realizadas');
+                    // Forzar redibujado para alinear encabezados
+                    setTimeout(function() {
+                        tableConsumos.columns.adjust();
+                        tableConsumos.draw();
+                    }, 100);
                 }
             });
 
-            // Inicializar tablas secundarias
+            // Inicializar DataTables para tablas secundarias
             if ($('#tablaComplementos').length) {
                 $('#tablaComplementos').DataTable({
                     language: {
@@ -1759,7 +1496,15 @@ if (!$exportarExcel):
                     },
                     pageLength: 15,
                     order: [[5, 'desc']],
-                    responsive: true
+                    dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>' +
+                         '<"row"<"col-sm-12"tr>>' +
+                         '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>',
+                    columnDefs: [
+                        {
+                            targets: [0], // Columna Nombre
+                            className: 'dt-left'
+                        }
+                    ]
                 });
             }
 
@@ -1769,82 +1514,30 @@ if (!$exportarExcel):
                         url: "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json"
                     },
                     pageLength: 15,
-                    order: [[1, 'desc']],
-                    responsive: true
+                    order: [[5, 'desc']],
+                    dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>' +
+                         '<"row"<"col-sm-12"tr>>' +
+                         '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>',
+                    columnDefs: [
+                        {
+                            targets: [0], // Columna Nombre
+                            className: 'dt-left'
+                        },
+                        {
+                            targets: [5], // Columna Monto
+                            className: 'dt-right'
+                        }
+                    ]
                 });
             }
 
-            // Ajustes responsive
+            // Ajustar tabla principal cuando cambia el tamaño de ventana
             $(window).resize(function() {
-                if ($(window).width() < 768) {
-                    $('.dataTables_scrollHead').css('overflow-x', 'auto');
+                if ($.fn.dataTable.isDataTable('#tablaConsumos')) {
+                    tableConsumos.columns.adjust();
                 }
-            });
-            
-            // Función para ordenar por complementos o cancelaciones
-            function sortTable(columnIndex) {
-                const table = $('#tablaPrincipal').DataTable();
-                table.order([columnIndex, 'desc']).draw();
-            }
-            
-            // Agregar eventos a los headers de las nuevas columnas
-            $(document).on('click', 'th.th-complementos', function() {
-                const columnIndex = $(this).index();
-                sortTable(columnIndex);
-            });
-            
-            $(document).on('click', 'th.th-cancelaciones', function() {
-                const columnIndex = $(this).index();
-                sortTable(columnIndex);
             });
         });
-
-        // Funciones de utilidad
-        function scrollToTop() {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        // Reset de fechas
-        function resetFechas() {
-            const twoWeeksAgo = new Date();
-            twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-            const today = new Date();
-            
-            document.getElementById('fechaInicio').value = twoWeeksAgo.toISOString().split('T')[0];
-            document.getElementById('fechaFin').value = today.toISOString().split('T')[0];
-        }
-
-        // Fullscreen
-        function toggleFullscreen() {
-            const elem = document.querySelector('.table-wrapper');
-            if (!document.fullscreenElement) {
-                elem.requestFullscreen().catch(err => {
-                    console.log(`Error: ${err.message}`);
-                });
-            } else {
-                document.exitFullscreen();
-            }
-        }
-        
-        // Función para resaltar empleados con muchos complementos o cancelaciones
-        function highlightEmployees() {
-            $('td.highlight-complementos').each(function() {
-                const value = parseInt($(this).text());
-                if (value > 10) {
-                    $(this).addClass('border-3 border-success');
-                }
-            });
-            
-            $('td.highlight-cancelaciones').each(function() {
-                const value = parseInt($(this).text());
-                if (value > 5) {
-                    $(this).addClass('border-3 border-danger');
-                }
-            });
-        }
-        
-        // Ejecutar al cargar
-        setTimeout(highlightEmployees, 1000);
     </script>
 
     <?php

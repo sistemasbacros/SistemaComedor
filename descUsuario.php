@@ -63,6 +63,49 @@ function obtenerUsuarioPorNombre($conn, $nombre) {
     return $usuarioData ? $usuarioData : false;
 }
 
+// ==================== FUNCIONES DE CÁLCULO DE PRECIOS ====================
+function calcularCostoConsumo($fecha, $cantidadConsumos, $tieneEntrada) {
+    $year = date('Y', strtotime($fecha));
+    
+    if ($year < 2026) {
+        $precioUnitario = 30;
+        $costoPorConsumo = $precioUnitario * $cantidadConsumos;
+    } else {
+        if ($cantidadConsumos == 2) {
+            $costoPorConsumo = 35 + 45;
+        } elseif ($cantidadConsumos == 1) {
+            $costoPorConsumo = 45;
+        } else {
+            $costoPorConsumo = 0;
+        }
+    }
+    
+    $costoTotal = $tieneEntrada ? $costoPorConsumo : ($costoPorConsumo * 2);
+    
+    return [
+        'costo_total' => $costoTotal,
+        'precio_unitario' => $year < 2026 ? 30 : ($cantidadConsumos == 2 ? [35, 45] : [45]),
+        'tiene_descuento' => $tieneEntrada,
+        'aplica_doble' => !$tieneEntrada,
+        'year' => $year
+    ];
+}
+
+// Función para calcular monto de entradas según rangos de precios
+function calcularMontoEntradas($fecha, $cantidadConsumos) {
+    $year = date('Y', strtotime($fecha));
+    
+    if ($year < 2026) {
+        return $cantidadConsumos * 30;
+    } else {
+        if ($cantidadConsumos == 2) {
+            return 80; // 35 + 45
+        } else {
+            return 45; // Solo comida
+        }
+    }
+}
+
 // ==================== VERIFICAR AUTENTICACIÓN ====================
 $conn = getDatabaseConnection();
 $usuarioAutenticado = false;
@@ -82,9 +125,8 @@ if ($conn && !empty($user_name) && $user_name != 'Usuario') {
     if ($usuarioFromDB) {
         $default_id_empleado = $usuarioFromDB['Id_Empleado'];
         $default_nombre = $usuarioFromDB['Nombre'];
-        $user_area = $usuarioFromDB['Area']; // Actualizar área desde la base de datos
+        $user_area = $usuarioFromDB['Area'];
         
-        // Si encontramos el usuario automáticamente, lo autenticamos directamente
         $usuarioAutenticado = true;
         $usuarioData = $usuarioFromDB;
         $_SESSION['usuario_autenticado'] = true;
@@ -99,7 +141,6 @@ if (isset($_SESSION['usuario_autenticado']) && $_SESSION['usuario_autenticado'] 
     $usuarioAutenticado = true;
     $usuarioData = $_SESSION['usuario_data'];
     
-    // Actualizar variables de sesión con datos del usuario autenticado
     if (isset($usuarioData['Nombre'])) {
         $_SESSION['user_name'] = $usuarioData['Nombre'];
         $user_name = $usuarioData['Nombre'];
@@ -126,7 +167,6 @@ if (isset($_POST['login']) && $conn) {
             $_SESSION['usuario_autenticado'] = true;
             $_SESSION['usuario_data'] = $usuarioData;
             
-            // Establecer variables de sesión del usuario
             $_SESSION['user_name'] = $usuarioData['Nombre'];
             $_SESSION['user_area'] = $usuarioData['Area'];
             $user_name = $usuarioData['Nombre'];
@@ -154,41 +194,38 @@ $consumosDiarios = [];
 $totalConsumos = 0;
 $totalEntradas = 0;
 $montoTotal = 0;
+$montoEntradas = 0;
 $diasConConsumo = 0;
 $debugInfo = [];
 $miFilaData = null;
 $consumosPorDia = [];
 $detalleConsumosPorDia = [];
+$detalleMontosPorDia = [];
 
 if ($usuarioAutenticado && $conn) {
-    // Obtener datos del usuario autenticado
     $miIdEmpleado = $usuarioData['Id_Empleado'];
     $miNombre = $usuarioData['Nombre'];
     
-    // Fechas por defecto
     $fechaInicio = $_GET['fechaInicio'] ?? date('Y-m-01');
     $fechaFin = $_GET['fechaFin'] ?? date('Y-m-d');
     
-    // Inicializar arrays de consumos por día (SOLO DÍAS HÁBILES)
     $consumosPorDia = [
         'Monday' => 0, 'Tuesday' => 0, 'Wednesday' => 0,
         'Thursday' => 0, 'Friday' => 0
     ];
     
     $detalleConsumosPorDia = [
-        'Monday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
-        'Tuesday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
-        'Wednesday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
-        'Thursday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
-        'Friday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0]
+        'Monday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0, 'monto' => 0],
+        'Tuesday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0, 'monto' => 0],
+        'Wednesday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0, 'monto' => 0],
+        'Thursday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0, 'monto' => 0],
+        'Friday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0, 'monto' => 0]
     ];
     
-    // Query completo proporcionado
     $sql = "
     DECLARE @columns AS NVARCHAR(MAX), @sql AS NVARCHAR(MAX);
     DECLARE @columnsSum NVARCHAR(MAX);
 
-    -- 1. Obtener lista de fechas para columnas pivote
     SELECT @columns = STRING_AGG(QUOTENAME(CAST(Fecha AS CHAR)), ', ')
                       WITHIN GROUP (ORDER BY Fecha ASC)
     FROM (
@@ -234,11 +271,9 @@ if ($usuarioAutenticado && $conn) {
         WHERE CAST(Fecha AS CHAR) >= '$fechaInicio' AND CAST(Fecha AS CHAR) <= '$fechaFin'
     ) AS FechaList;
 
-    -- 2. Construir la suma de columnas dinámicamente
     SELECT @columnsSum = STRING_AGG('ISNULL(' + TRIM(value) + ', 0)', ' + ')
     FROM STRING_SPLIT(REPLACE(@columns, ' ', ''), ',');
 
-    -- 3. Construir la consulta dinámica completa
     SET @sql = N'
     ;WITH EntradasCTE AS (
         SELECT Empleado, Nombre, Total FROM (
@@ -381,34 +416,26 @@ if ($usuarioAutenticado && $conn) {
     ORDER BY pvt.Id_Empleado;
     ';
 
-    -- 4. Ejecutar el SQL dinámico
     EXEC sp_executesql @sql;
     ";
     
-    // Ejecutar el query
     $stmt = sqlsrv_query($conn, $sql);
     
     if ($stmt) {
-        // ==================== DIAGNÓSTICO MEJORADO ====================
-        $debugData = [];
         $allFechas = [];
         
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            // Filtrar solo los registros del usuario actual
             if ($row['Id_Empleado'] == $miIdEmpleado || $row['Nombre'] == $miNombre) {
                 $reporteData[] = $row;
-                $miFilaData = $row; // Guardar la fila específica del usuario
+                $miFilaData = $row;
                 
-                // Procesamiento MEJORADO de consumos
                 $consumosEnEstaFila = 0;
-                $fechasConConsumoEnFila = [];
+                $misEntradas = intval($row['TotalEntradas'] ?? 0);
                 
                 foreach ($row as $campo => $valor) {
-                    // Detección MEJORADA de fechas
                     $esFecha = false;
                     $fechaNormalizada = '';
                     
-                    // Múltiples patrones de fecha
                     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $campo)) {
                         $esFecha = true;
                         $fechaNormalizada = $campo;
@@ -417,197 +444,87 @@ if ($usuarioAutenticado && $conn) {
                         $fechaNormalizada = str_replace('/', '-', $campo);
                     } elseif (strpos($campo, '202') === 0) {
                         $esFecha = true;
-                        // Intentar normalizar cualquier formato que empiece con 202
                         $fechaNormalizada = date('Y-m-d', strtotime($campo));
                     }
                     
-                    if ($esFecha && $fechaNormalizada) {
-                        // Verificar si esta fecha está en el rango
-                        if ($fechaNormalizada >= $fechaInicio && $fechaNormalizada <= $fechaFin) {
-                            $allFechas[$fechaNormalizada] = $campo; // Guardar mapeo
+                    if ($esFecha && $fechaNormalizada && $fechaNormalizada >= $fechaInicio && $fechaNormalizada <= $fechaFin) {
+                        $allFechas[$fechaNormalizada] = $campo;
+                        
+                        $tieneConsumo = false;
+                        $cantidadConsumos = 0;
+                        
+                        if ($valor === 1 || $valor === '1' || $valor === true) {
+                            $tieneConsumo = true;
+                            $cantidadConsumos = 1;
+                        } elseif (is_numeric($valor) && floatval($valor) > 0) {
+                            $tieneConsumo = true;
+                            $cantidadConsumos = intval($valor);
+                        }
+                        
+                        if ($tieneConsumo) {
+                            $consumosEnEstaFila += $cantidadConsumos;
                             
-                            // Detección MEJORADA de consumo
-                            $tieneConsumo = false;
-                            $cantidadConsumos = 0;
+                            $tieneEntradaEstaFecha = ($misEntradas > 0);
+                            $costoCalculado = calcularCostoConsumo($fechaNormalizada, $cantidadConsumos, $tieneEntradaEstaFecha);
+                            $montoEntradaCalculado = calcularMontoEntradas($fechaNormalizada, $cantidadConsumos);
                             
-                            if ($valor === 1 || $valor === '1' || $valor === true) {
-                                $tieneConsumo = true;
-                                $cantidadConsumos = 1;
-                            } elseif (is_numeric($valor) && floatval($valor) > 0) {
-                                $tieneConsumo = true;
-                                $cantidadConsumos = intval($valor);
-                            } elseif ($valor === 'S' || $valor === 'X' || $valor === '✔') {
-                                $tieneConsumo = true;
-                                $cantidadConsumos = 1;
-                            }
+                            $diaSemanaIngles = date('l', strtotime($fechaNormalizada));
                             
-                            if ($tieneConsumo) {
-                                $consumosEnEstaFila += $cantidadConsumos;
-                                $fechasConConsumoEnFila[] = [
-                                    'campo_original' => $campo,
-                                    'fecha_normalizada' => $fechaNormalizada,
-                                    'valor' => $valor,
-                                    'cantidad' => $cantidadConsumos
-                                ];
+                            if (isset($consumosPorDia[$diaSemanaIngles])) {
+                                $consumosPorDia[$diaSemanaIngles] += $cantidadConsumos;
+                                $detalleConsumosPorDia[$diaSemanaIngles]['monto'] += $costoCalculado['costo_total'];
                                 
-                                // ==================== CÁLCULO CORREGIDO DE CONSUMOS POR DÍA ====================
-                                $diaSemanaIngles = date('l', strtotime($fechaNormalizada));
-                                
-                                // SOLO CONTAR DÍAS HÁBILES (Lunes a Viernes)
-                                if (isset($consumosPorDia[$diaSemanaIngles])) {
-                                    $consumosPorDia[$diaSemanaIngles] += $cantidadConsumos;
-                                    
-                                    // Detectar tipo de comida basado en la hora (si es posible)
-                                    // Por ahora asumimos que cada consumo es una comida completa
-                                    // En una implementación real, esto debería venir del query
-                                    if (isset($detalleConsumosPorDia[$diaSemanaIngles])) {
-                                        // Si hay más de 1 consumo en el mismo día, asumimos desayuno + comida
-                                        if ($cantidadConsumos >= 2) {
-                                            $detalleConsumosPorDia[$diaSemanaIngles]['desayunos'] += 1;
-                                            $detalleConsumosPorDia[$diaSemanaIngles]['comidas'] += 1;
-                                            $detalleConsumosPorDia[$diaSemanaIngles]['total'] += 2;
-                                        } else {
-                                            // Si es 1 consumo, asumimos que es comida
-                                            $detalleConsumosPorDia[$diaSemanaIngles]['comidas'] += 1;
-                                            $detalleConsumosPorDia[$diaSemanaIngles]['total'] += 1;
-                                        }
-                                    }
+                                if ($cantidadConsumos == 2) {
+                                    $detalleConsumosPorDia[$diaSemanaIngles]['desayunos'] += 1;
+                                    $detalleConsumosPorDia[$diaSemanaIngles]['comidas'] += 1;
+                                    $detalleConsumosPorDia[$diaSemanaIngles]['total'] += 2;
+                                } else {
+                                    $detalleConsumosPorDia[$diaSemanaIngles]['comidas'] += $cantidadConsumos;
+                                    $detalleConsumosPorDia[$diaSemanaIngles]['total'] += $cantidadConsumos;
                                 }
-                                
-                                $consumosDiarios[$fechaNormalizada] = [
-                                    'fecha' => $fechaNormalizada,
-                                    'dia_semana' => $diaSemanaIngles,
-                                    'consumo' => true,
-                                    'cantidad' => $cantidadConsumos,
-                                    'monto' => $cantidadConsumos * 30,
-                                    'campo_original' => $campo,
-                                    'valor_original' => $valor
-                                ];
-                                $diasConConsumo++;
                             }
+                            
+                            $consumosDiarios[$fechaNormalizada] = [
+                                'fecha' => $fechaNormalizada,
+                                'dia_semana' => $diaSemanaIngles,
+                                'consumo' => true,
+                                'cantidad' => $cantidadConsumos,
+                                'costo_calculado' => $costoCalculado,
+                                'tiene_entrada' => $tieneEntradaEstaFecha,
+                                'monto' => $costoCalculado['costo_total'],
+                                'monto_entrada' => $montoEntradaCalculado,
+                                'campo_original' => $campo,
+                                'valor_original' => $valor
+                            ];
+                            
+                            $diasConConsumo++;
                         }
                     }
                 }
                 
-                // Información de debug
-                $debugData[] = [
-                    'id_empleado' => $row['Id_Empleado'],
-                    'nombre' => $row['Nombre'],
-                    'total_consumos_campo' => $row['TotalConsumos'] ?? 0,
-                    'consumos_detectados' => $consumosEnEstaFila,
-                    'fechas_con_consumo' => $fechasConConsumoEnFila,
-                    'total_entradas' => $row['TotalEntradas'] ?? 0
-                ];
-                
-                $totalConsumos += isset($row['TotalConsumos']) ? intval($row['TotalConsumos']) : 0;
-                $totalEntradas += isset($row['TotalEntradas']) ? intval($row['TotalEntradas']) : 0;
+                $totalConsumos += $consumosEnEstaFila;
+                $totalEntradas += intval($row['TotalEntradas'] ?? 0);
             }
         }
         
-        // Re-procesar para asegurar consistencia
-        if (!empty($reporteData)) {
-            $totalConsumos = 0;
-            foreach ($reporteData as &$fila) {
-                $consumosEnFila = 0;
-                foreach ($fila as $campo => $valor) {
-                    if (isset($allFechas[$campo]) || in_array($campo, $allFechas)) {
-                        if (is_numeric($valor)) {
-                            $consumosEnFila += intval($valor);
-                        } elseif ($valor == 1 || $valor === '1' || $valor === true) {
-                            $consumosEnFila += 1;
-                        }
-                    }
-                }
-                $fila['TotalConsumosCalculado'] = $consumosEnFila;
-                $totalConsumos += $consumosEnFila;
-            }
+        // Calcular montos totales
+        $montoTotal = 0;
+        $montoEntradas = 0;
+        
+        foreach ($consumosDiarios as $consumoDia) {
+            $montoTotal += $consumoDia['monto'];
+            $montoEntradas += $consumoDia['monto_entrada'];
         }
         
-        // ==================== CÁLCULO CORREGIDO DEL MONTO TOTAL ====================
-        // Usar los datos específicos de la fila del usuario
-        if ($miFilaData) {
-            $misConsumos = intval($miFilaData['TotalConsumos'] ?? $miFilaData['TotalConsumosCalculado'] ?? 0);
-            $misEntradas = intval($miFilaData['TotalEntradas'] ?? 0);
-            
-            // Lógica corregida: 
-            // - Si misConsumos > misEntradas: (misConsumos - misEntradas) * 60 + misEntradas * 30
-            // - Si misConsumos <= misEntradas: misConsumos * 30
-            
-            if ($misConsumos > $misEntradas) {
-                $consumosSinEntrada = $misConsumos - $misEntradas;
-                $montoTotal = ($consumosSinEntrada * 60) + ($misEntradas * 30);
-            } else {
-                $montoTotal = $misConsumos * 30;
-            }
-            
-            // Actualizar totales para mostrar correctamente en las tarjetas
-            $totalConsumos = $misConsumos;
-            $totalEntradas = $misEntradas;
-        }
-        
-        // ==================== VERIFICACIÓN DEL CÁLCULO DE CONSUMOS POR DÍA ====================
-        // Recalcular para asegurar que coincida con el total (SOLO DÍAS HÁBILES)
-        $totalConsumosDiasHabiles = array_sum($consumosPorDia);
-        
-        // Si hay discrepancia, recalcular desde consumosDiarios (SOLO DÍAS HÁBILES)
-        if ($totalConsumosDiasHabiles != $totalConsumos) {
-            $consumosPorDia = [
-                'Monday' => 0, 'Tuesday' => 0, 'Wednesday' => 0,
-                'Thursday' => 0, 'Friday' => 0
-            ];
-            
-            $detalleConsumosPorDia = [
-                'Monday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
-                'Tuesday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
-                'Wednesday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
-                'Thursday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
-                'Friday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0]
-            ];
-            
-            foreach ($consumosDiarios as $consumo) {
-                $diaSemana = $consumo['dia_semana'];
-                $cantidad = $consumo['cantidad'] ?? 1;
-                
-                // SOLO CONTAR DÍAS HÁBILES
-                if (isset($consumosPorDia[$diaSemana])) {
-                    $consumosPorDia[$diaSemana] += $cantidad;
-                    
-                    // Actualizar detalle
-                    if ($cantidad >= 2) {
-                        $detalleConsumosPorDia[$diaSemana]['desayunos'] += 1;
-                        $detalleConsumosPorDia[$diaSemana]['comidas'] += 1;
-                        $detalleConsumosPorDia[$diaSemana]['total'] += 2;
-                    } else {
-                        $detalleConsumosPorDia[$diaSemana]['comidas'] += 1;
-                        $detalleConsumosPorDia[$diaSemana]['total'] += 1;
-                    }
-                }
-            }
-        }
-        
-        // Guardar info de debug
         $debugInfo = [
             'fecha_inicio' => $fechaInicio,
             'fecha_fin' => $fechaFin,
-            'usuario_buscado' => $miIdEmpleado . ' - ' . $miNombre,
-            'filas_encontradas' => count($reporteData),
-            'debug_data' => $debugData,
-            'all_fechas' => $allFechas,
-            'total_consumos_calculado' => $totalConsumos,
-            'dias_con_consumo' => $diasConConsumo,
-            'consumos_por_dia' => $consumosPorDia,
-            'detalle_consumos_por_dia' => $detalleConsumosPorDia,
-            'total_consumos_dias_habiles' => array_sum($consumosPorDia),
-            'monto_calculo' => [
-                'mis_consumos' => $misConsumos ?? 0,
-                'mis_entradas' => $misEntradas ?? 0,
-                'consumos_sin_entrada' => isset($misConsumos, $misEntradas) && $misConsumos > $misEntradas ? ($misConsumos - $misEntradas) : 0,
-                'formula_usada' => isset($misConsumos, $misEntradas) ? 
-                    ($misConsumos > $misEntradas ? 
-                        "($misConsumos - $misEntradas) * 60 + $misEntradas * 30" : 
-                        "$misConsumos * 30") : 
-                    "Sin datos"
-            ]
+            'usuario' => $miIdEmpleado . ' - ' . $miNombre,
+            'total_consumos' => $totalConsumos,
+            'total_entradas' => $totalEntradas,
+            'monto_total' => $montoTotal,
+            'monto_entradas' => $montoEntradas,
+            'dias_con_consumo' => $diasConConsumo
         ];
         
         sqlsrv_free_stmt($stmt);
@@ -626,7 +543,7 @@ if (isset($conn)) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mi Reporte Detallado - Comedor</title>
+    <title>Reporte de Consumos - Comedor</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
@@ -639,13 +556,17 @@ if (isset($conn)) {
             --warning: #ffc107;
             --info: #17a2b8;
             --danger: #dc3545;
+            --dark-red: #8b0000;
         }
+        
         body {
             background: linear-gradient(135deg, var(--navy-dark) 0%, var(--navy-blue) 100%);
             color: white;
             min-height: 100vh;
-            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-bottom: 20px;
         }
+        
         .glass-card {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
@@ -653,101 +574,185 @@ if (isset($conn)) {
             border: 1px solid rgba(255, 255, 255, 0.2);
             padding: 20px;
             margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
         }
-        .table-custom {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 10px;
-            overflow: hidden;
+        
+        .user-header {
+            background: linear-gradient(135deg, var(--gold), #b8941f);
+            color: var(--navy-dark);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3);
         }
-        .table-custom th {
-            background: var(--navy-light);
-            color: white;
-            position: sticky;
-            top: 0;
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            border-left: 4px solid var(--gold);
+            height: 100%;
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-3px);
+        }
+        
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--gold);
+        }
+        
+        .stat-subtitle {
             font-size: 0.8rem;
-            padding: 8px 4px;
-            text-align: center;
+            opacity: 0.8;
         }
-        .table-custom td {
-            color: white;
-            border-color: rgba(255, 255, 255, 0.1);
-            padding: 8px 4px;
-            text-align: center;
-        }
+        
         .btn-gold {
             background: var(--gold);
             border: none;
             color: var(--navy-dark);
             font-weight: bold;
         }
+        
         .btn-gold:hover {
             background: #e6c86e;
             color: var(--navy-dark);
         }
-        .stat-card {
-            background: rgba(255, 255, 255, 0.1);
+        
+        .table-custom {
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 10px;
-            padding: 20px;
+            overflow: hidden;
+            color: white;
+            margin-bottom: 0;
+            font-size: 0.85rem;
+        }
+        
+        .table-custom th {
+            background: var(--navy-light);
+            color: white;
+            position: sticky;
+            top: 0;
+            padding: 10px 8px;
             text-align: center;
-            border-left: 4px solid var(--gold);
+            border: none;
+            font-size: 0.85rem;
+            white-space: nowrap;
         }
-        .stat-number {
-            font-size: 2.5rem;
-            font-weight: bold;
-            color: var(--gold);
+        
+        .table-custom td {
+            color: white;
+            border-color: rgba(255, 255, 255, 0.1);
+            padding: 8px 6px;
+            text-align: center;
+            vertical-align: middle;
         }
-        .stat-subtitle {
-            font-size: 0.9rem;
-            opacity: 0.8;
-        }
-        .user-header {
-            background: linear-gradient(135deg, var(--gold), #b8941f);
-            color: var(--navy-dark);
+        
+        .table-responsive-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
             border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 5px;
         }
+        
         .consumo-cell {
             background: rgba(40, 167, 69, 0.3);
             font-weight: bold;
         }
+        
+        .multi-consumo {
+            background: rgba(255, 193, 7, 0.3);
+        }
+        
         .sin-consumo-cell {
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(220, 53, 69, 0.3);
+            border: 1px solid var(--danger);
         }
-        .scrollable-table {
-            max-height: 800px;
-            overflow-y: auto;
-            overflow-x: auto;
+        
+        .sin-consumo-cell:hover {
+            background: rgba(220, 53, 69, 0.4);
         }
-        .info-usuario {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
+        
+        .sin-entrada {
+            background: rgba(139, 0, 0, 0.3);
+            border: 1px solid var(--dark-red);
         }
+        
         .badge-consumo {
             background: var(--success);
             color: white;
-            font-size: 0.7rem;
+            font-size: 0.75rem;
+            padding: 4px 8px;
+            border-radius: 10px;
         }
+        
+        .badge-desayuno {
+            background: var(--info);
+            color: white;
+            font-size: 0.65rem;
+            padding: 2px 5px;
+            border-radius: 8px;
+        }
+        
+        .badge-comida {
+            background: var(--success);
+            color: white;
+            font-size: 0.65rem;
+            padding: 2px 5px;
+            border-radius: 8px;
+        }
+        
+        .badge-doble {
+            background: var(--danger);
+            color: white;
+            font-size: 0.65rem;
+            padding: 2px 5px;
+            border-radius: 8px;
+        }
+        
         .badge-total {
             background: var(--warning);
-            color: black;
-            font-size: 0.9rem;
+            color: var(--navy-dark);
+            font-size: 0.85rem;
+            padding: 5px 10px;
+            border-radius: 10px;
         }
-        .columna-fecha {
-            min-width: 50px;
+        
+        .badge-rojo {
+            background: var(--danger);
+            color: white;
+            font-size: 0.7rem;
+            padding: 3px 6px;
+            border-radius: 8px;
         }
-        .columna-principal {
-            min-width: 120px;
-            position: sticky;
-            left: 0;
-            background: var(--navy-light);
-            z-index: 2;
+        
+        .resumen-dia {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            margin: 5px 0;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
         }
-        .table-responsive {
+        
+        .dias-habiles {
             font-size: 0.8rem;
+            color: var(--gold);
+            font-weight: bold;
         }
+        
+        .detalle-consumo {
+            font-size: 0.75rem;
+            color: #ccc;
+            margin-top: 3px;
+        }
+        
         .debug-panel {
             background: rgba(255, 193, 7, 0.2);
             border: 1px solid var(--warning);
@@ -755,454 +760,691 @@ if (isset($conn)) {
             padding: 15px;
             margin-bottom: 20px;
         }
-        .consumo-dia {
-            background: rgba(40, 167, 69, 0.2);
-            border-radius: 5px;
-            padding: 10px;
-            margin: 5px 0;
-        }
-        .monto-detalle {
-            font-size: 0.8rem;
-            opacity: 0.8;
-        }
-        .costo-diferente {
-            color: #ff6b6b;
-            font-weight: bold;
-        }
-        .resumen-dia {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 12px;
-            margin: 4px 0;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 5px;
-        }
-        .dias-habiles {
-            font-size: 0.8rem;
-            color: var(--gold);
-            font-weight: bold;
-        }
-        .detalle-consumo {
-            font-size: 0.75rem;
-            color: #ccc;
-            margin-top: 2px;
-        }
-        .badge-desayuno {
-            background: #17a2b8;
-            color: white;
-            font-size: 0.65rem;
-        }
-        .badge-comida {
-            background: #28a745;
-            color: white;
-            font-size: 0.65rem;
-        }
-        .multi-consumo {
-            background: rgba(255, 193, 7, 0.3);
-            border: 1px solid var(--warning);
-        }
+        
         .auto-login-notice {
             background: rgba(40, 167, 69, 0.2);
             border: 1px solid var(--success);
             border-radius: 5px;
             padding: 10px;
             margin-bottom: 15px;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
+        }
+        
+        .monto-detalle {
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+        
+        .columna-fecha {
+            min-width: 50px;
+        }
+        
+        .periodo-2025 {
+            border-left: 3px solid var(--info);
+        }
+        
+        .periodo-2026 {
+            border-left: 3px solid var(--warning);
+        }
+        
+        .user-info-badge {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 8px 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .monto-entradas {
+            font-weight: bold;
+            color: var(--info);
+        }
+        
+        @media (max-width: 768px) {
+            .stat-card {
+                margin-bottom: 10px;
+            }
+            
+            .stat-number {
+                font-size: 1.5rem;
+            }
+            
+            .glass-card {
+                padding: 15px;
+            }
+            
+            .table-custom {
+                font-size: 0.8rem;
+            }
+            
+            .table-custom th,
+            .table-custom td {
+                padding: 6px 4px;
+            }
+            
+            .badge-consumo {
+                font-size: 0.7rem;
+                padding: 3px 6px;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            body {
+                padding: 10px;
+            }
+            
+            .stat-number {
+                font-size: 1.3rem;
+            }
+            
+            .user-header h2 {
+                font-size: 1.3rem;
+            }
+            
+            .resumen-dia {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+            }
+            
+            .resumen-dia > div:last-child {
+                align-self: flex-end;
+            }
+        }
+        
+        .price-highlight {
+            font-weight: bold;
+            color: var(--gold);
+        }
+        
+        .scroll-hint {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+        
+        .no-consumo-text {
+            color: var(--danger);
+            font-weight: bold;
+            font-size: 0.8rem;
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="container-fluid">
         <?php if (!$usuarioAutenticado): ?>
-            <!-- LOGIN -->
-            <div class="row justify-content-center mt-5">
-                <div class="col-md-6">
-                    <div class="glass-card text-center">
-                        <h1><i class="fas fa-utensils"></i> COMEDOR BACROCORP</h1>
-                        <p class="lead">Mi Reporte Personal de Consumos</p>
+            <!-- PANTALLA DE LOGIN -->
+            <div class="row justify-content-center align-items-center min-vh-100">
+                <div class="col-12 col-md-6 col-lg-5">
+                    <div class="glass-card">
+                        <div class="text-center mb-4">
+                            <h1 class="mb-3"><i class="fas fa-utensils"></i> COMEDOR BACROCORP</h1>
+                            <p class="lead">Reporte Personal de Consumos</p>
+                        </div>
                         
                         <?php if (!empty($user_name) && $user_name != 'Usuario'): ?>
                             <div class="auto-login-notice">
                                 <i class="fas fa-info-circle"></i> 
-                                Hola <strong><?php echo htmlspecialchars($user_name); ?></strong>. 
-                                El sistema intentará encontrar tu información automáticamente.
+                                Hola <strong><?php echo htmlspecialchars($user_name); ?></strong>
                             </div>
                         <?php endif; ?>
                         
                         <form method="POST" class="mt-4">
                             <input type="hidden" name="login" value="1">
+                            
                             <div class="mb-3">
                                 <label class="form-label">ID Empleado</label>
-                                <input type="text" class="form-control" name="id_empleado" placeholder="ID Empleado" value="<?php echo htmlspecialchars($default_id_empleado); ?>" required>
+                                <input type="text" class="form-control" name="id_empleado" 
+                                       value="<?php echo htmlspecialchars($default_id_empleado); ?>" 
+                                       required>
                             </div>
-                            <div class="mb-3">
+                            
+                            <div class="mb-4">
                                 <label class="form-label">Nombre Completo</label>
-                                <input type="text" class="form-control" name="nombre" placeholder="Nombre" value="<?php echo htmlspecialchars($default_nombre); ?>" required>
+                                <input type="text" class="form-control" name="nombre" 
+                                       value="<?php echo htmlspecialchars($default_nombre); ?>" 
+                                       required>
                             </div>
+                            
                             <?php if (isset($errorAuth)): ?>
-                                <div class="alert alert-danger"><?php echo $errorAuth; ?></div>
+                                <div class="alert alert-danger">
+                                    <?php echo $errorAuth; ?>
+                                </div>
                             <?php endif; ?>
+                            
                             <button type="submit" class="btn btn-gold btn-lg w-100">
-                                <i class="fas fa-chart-bar"></i> VER MI REPORTE
+                                <i class="fas fa-chart-bar"></i> VER REPORTE
                             </button>
                         </form>
                     </div>
                 </div>
             </div>
+            
         <?php else: ?>
-            <!-- SISTEMA PRINCIPAL -->
+            <!-- HEADER DEL USUARIO -->
             <div class="user-header">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h2><i class="fas fa-user"></i> <?php echo htmlspecialchars($user_name); ?></h2>
-                        <p class="mb-0">ID: <?php echo htmlspecialchars($usuarioData['Id_Empleado']); ?> | Área: <?php echo htmlspecialchars($user_area); ?></p>
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h2 class="h4 mb-1">
+                            <i class="fas fa-user"></i> 
+                            ID: <?php echo htmlspecialchars($usuarioData['Id_Empleado']); ?> - 
+                            <?php echo htmlspecialchars($user_name); ?>
+                        </h2>
+                        <p class="mb-0">
+                            Área: <?php echo htmlspecialchars($user_area); ?>
+                        </p>
                     </div>
-                    <div>
-                        <a href="?debug=1" class="btn btn-outline-dark btn-sm">
-                            <i class="fas fa-bug"></i> Debug
-                        </a>
-                        <a href="?logout=1" class="btn btn-outline-dark">
-                            <i class="fas fa-sign-out-alt"></i> Salir
-                        </a>
+                    <div class="col-md-4 mt-2 mt-md-0">
+                        <div class="d-flex gap-2 justify-content-md-end">
+                            <a href="?debug=1" class="btn btn-outline-dark btn-sm">
+                                <i class="fas fa-bug"></i>
+                            </a>
+                            <a href="?logout=1" class="btn btn-outline-dark">
+                                <i class="fas fa-sign-out-alt"></i> Salir
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
-
-            <!-- PANEL DE DEBUG (opcional) -->
+            
             <?php if (isset($_GET['debug']) && !empty($debugInfo)): ?>
             <div class="debug-panel">
-                <h4><i class="fas fa-bug"></i> Información de Diagnóstico</h4>
+                <h5 class="mb-3"><i class="fas fa-bug"></i> Información de Diagnóstico</h5>
                 <div class="row">
-                    <div class="col-md-6">
-                        <strong>Período:</strong> <?php echo $debugInfo['fecha_inicio']; ?> a <?php echo $debugInfo['fecha_fin']; ?><br>
-                        <strong>Usuario:</strong> <?php echo $debugInfo['usuario_buscado']; ?><br>
-                        <strong>Filas encontradas:</strong> <?php echo $debugInfo['filas_encontradas']; ?><br>
-                        <strong>Total consumos (calculado):</strong> <?php echo $debugInfo['total_consumos_calculado']; ?><br>
-                        <strong>Días con consumo:</strong> <?php echo $debugInfo['dias_con_consumo']; ?><br>
-                        <strong>Total consumos días hábiles:</strong> <?php echo $debugInfo['total_consumos_dias_habiles']; ?>
+                    <div class="col-6">
+                        <strong>Período:</strong><br>
+                        <?php echo $debugInfo['fecha_inicio']; ?> a <?php echo $debugInfo['fecha_fin']; ?>
                     </div>
-                    <div class="col-md-6">
-                        <strong>Fechas detectadas:</strong> <?php echo count($debugInfo['all_fechas']); ?><br>
-                        <strong>Cálculo Monto:</strong><br>
-                        <small>
-                            Mis Consumos: <?php echo $debugInfo['monto_calculo']['mis_consumos']; ?><br>
-                            Mis Entradas: <?php echo $debugInfo['monto_calculo']['mis_entradas']; ?><br>
-                            <?php if ($debugInfo['monto_calculo']['consumos_sin_entrada'] > 0): ?>
-                                <span class="costo-diferente">Consumos sin entrada: <?php echo $debugInfo['monto_calculo']['consumos_sin_entrada']; ?> × $60</span><br>
-                                Consumos con entrada: <?php echo $debugInfo['monto_calculo']['mis_entradas']; ?> × $30<br>
-                                Fórmula: <?php echo $debugInfo['monto_calculo']['formula_usada']; ?>
-                            <?php else: ?>
-                                Fórmula: <?php echo $debugInfo['monto_calculo']['formula_usada']; ?>
-                            <?php endif; ?>
-                        </small>
-                        <?php if (isset($debugInfo['detalle_consumos_por_dia'])): ?>
-                        <br><strong>Detalle consumos por día:</strong><br>
-                        <small>
-                            <?php 
-                            $diasEng = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-                            $diasEsp = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
-                            foreach ($diasEng as $index => $diaEng): 
-                                $detalle = $debugInfo['detalle_consumos_por_dia'][$diaEng] ?? ['desayunos' => 0, 'comidas' => 0, 'total' => 0];
-                            ?>
-                                <?php echo $diasEsp[$index]; ?>: D=<?php echo $detalle['desayunos']; ?> C=<?php echo $detalle['comidas']; ?> T=<?php echo $detalle['total']; ?><br>
-                            <?php endforeach; ?>
-                        </small>
-                        <?php endif; ?>
+                    <div class="col-6">
+                        <strong>Usuario:</strong><br>
+                        <?php echo $debugInfo['usuario']; ?>
                     </div>
                 </div>
             </div>
             <?php endif; ?>
-
+            
             <!-- FILTROS -->
             <div class="glass-card">
-                <h3><i class="fas fa-filter"></i> Filtros del Reporte</h3>
-                <form method="GET" class="row g-3">
+                <form method="GET" class="row g-2">
                     <div class="col-md-4">
-                        <label>Fecha Inicio:</label>
-                        <input type="date" name="fechaInicio" class="form-control" value="<?php echo $fechaInicio; ?>">
+                        <label class="form-label">Fecha Inicio:</label>
+                        <input type="date" name="fechaInicio" class="form-control" 
+                               value="<?php echo $fechaInicio; ?>">
                     </div>
                     <div class="col-md-4">
-                        <label>Fecha Fin:</label>
-                        <input type="date" name="fechaFin" class="form-control" value="<?php echo $fechaFin; ?>">
+                        <label class="form-label">Fecha Fin:</label>
+                        <input type="date" name="fechaFin" class="form-control" 
+                               value="<?php echo $fechaFin; ?>">
                     </div>
-                    <div class="col-md-4">
-                        <label>&nbsp;</label>
+                    <div class="col-md-4 d-flex align-items-end">
                         <button type="submit" class="btn btn-gold w-100">
                             <i class="fas fa-sync-alt"></i> ACTUALIZAR
                         </button>
                     </div>
                 </form>
             </div>
-
+            
             <!-- RESUMEN PRINCIPAL -->
-            <div class="row">
-                <div class="col-md-3">
+            <div class="row mb-3">
+                <div class="col-6 col-md-3 mb-2">
                     <div class="stat-card">
                         <div class="stat-number"><?php echo $totalConsumos; ?></div>
-                        <div>Total Consumos</div>
-                        <div class="stat-subtitle"><?php echo $diasConConsumo; ?> días con consumo</div>
+                        <div>Consumos</div>
+                        <div class="stat-subtitle"><?php echo $diasConConsumo; ?> días</div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-6 col-md-3 mb-2">
                     <div class="stat-card">
                         <div class="stat-number">$<?php echo number_format($montoTotal, 0); ?></div>
                         <div>Monto Total</div>
                         <div class="stat-subtitle monto-detalle">
                             <?php 
-                            $misConsumos = $miFilaData ? intval($miFilaData['TotalConsumos'] ?? $miFilaData['TotalConsumosCalculado'] ?? 0) : 0;
-                            $misEntradas = $miFilaData ? intval($miFilaData['TotalEntradas'] ?? 0) : 0;
-                            
-                            if ($misConsumos > $misEntradas): 
-                                $consumosSinEntrada = $misConsumos - $misEntradas;
-                            ?>
-                                <span class="costo-diferente"><?php echo $consumosSinEntrada; ?> × $60</span><br>
-                                + <?php echo $misEntradas; ?> × $30
-                            <?php else: ?>
-                                <?php echo $misConsumos; ?> × $30
+                            $antes2026 = 0;
+                            $desde2026 = 0;
+                            foreach ($consumosDiarios as $consumo) {
+                                if ($consumo['costo_calculado']['year'] < 2026) {
+                                    $antes2026 += $consumo['monto'];
+                                } else {
+                                    $desde2026 += $consumo['monto'];
+                                }
+                            }
+                            if ($antes2026 > 0): ?>
+                                <span class="d-block">2025: $<?php echo number_format($antes2026, 0); ?></span>
+                            <?php endif; ?>
+                            <?php if ($desde2026 > 0): ?>
+                                <span class="d-block">2026+: $<?php echo number_format($desde2026, 0); ?></span>
                             <?php endif; ?>
                         </div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-6 col-md-3 mb-2">
                     <div class="stat-card">
-                        <div class="stat-number"><?php echo $totalEntradas; ?></div>
-                        <div>Registros Entrada</div>
-                        <div class="stat-subtitle">Control de acceso</div>
+                        <div class="stat-number">$<?php echo number_format($montoEntradas, 0); ?></div>
+                        <div>Monto Entradas</div>
+                        <div class="stat-subtitle">Con descuento aplicado</div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-6 col-md-3 mb-2">
                     <div class="stat-card">
                         <div class="stat-number"><?php echo count($consumosDiarios); ?></div>
-                        <div>Días Registrados</div>
-                        <div class="stat-subtitle">En el período</div>
+                        <div>Días</div>
+                        <div class="stat-subtitle">Con consumo</div>
                     </div>
                 </div>
             </div>
-
-            <!-- INFORMACIÓN DEL USUARIO -->
-            <div class="info-usuario">
-                <h4><i class="fas fa-id-card"></i> Mi Información</h4>
+            
+            <!-- POLÍTICA DE PRECIOS -->
+            <div class="glass-card mb-3" style="background: rgba(255, 193, 7, 0.1);">
                 <div class="row">
-                    <div class="col-md-3">
-                        <strong>ID Empleado:</strong> <?php echo htmlspecialchars($miIdEmpleado); ?>
+                    <div class="col-md-6">
+                        <strong><i class="fas fa-money-bill-wave"></i> Política de Precios:</strong><br>
+                        <small>
+                            <strong>Antes 2026:</strong> Todos los consumos: $30<br>
+                            <strong>2026+:</strong> Desayuno: $35, Comida: $45<br>
+                            <strong>Monto Entradas:</strong> Precio con descuento aplicado<br>
+                            <strong>Rojo:</strong> Día sin consumo registrado
+                        </small>
                     </div>
-                    <div class="col-md-3">
-                        <strong>Nombre:</strong> <?php echo htmlspecialchars($user_name); ?>
-                    </div>
-                    <div class="col-md-3">
-                        <strong>Área:</strong> <?php echo htmlspecialchars($user_area); ?>
-                    </div>
-                    <div class="col-md-3">
-                        <strong>Período:</strong> <?php echo date('d/m/Y', strtotime($fechaInicio)); ?> al <?php echo date('d/m/Y', strtotime($fechaFin)); ?>
+                    <div class="col-md-6 text-md-end">
+                        <small class="text-muted">
+                            Período: <?php echo date('d/m/Y', strtotime($fechaInicio)); ?> - <?php echo date('d/m/Y', strtotime($fechaFin)); ?>
+                        </small>
                     </div>
                 </div>
             </div>
-
-            <!-- VISTA DETALLADA CON TODAS LAS COLUMNAS DE DÍAS -->
+            
+            <!-- REPORTE DETALLADO -->
             <div class="glass-card">
-                <h3><i class="fas fa-calendar-day"></i> Mi Consumo Diario Detallado</h3>
-                <p class="mb-3">Mostrando todos los días del período para: <strong><?php echo htmlspecialchars($user_name); ?></strong> (ID: <?php echo htmlspecialchars($miIdEmpleado); ?>)</p>
-                
-                <?php if (!empty($reporteData)): ?>
-                    <div class="table-responsive">
-                        <div class="scrollable-table">
-                            <table class="table table-custom table-bordered">
-                                <thead>
-                                    <tr>
-                                        <th class="columna-principal">ID Empleado</th>
-                                        <th class="columna-principal">Nombre</th>
-                                        <th class="columna-principal">Total Consumos</th>
-                                        <th class="columna-principal">Total Entradas</th>
-                                        <?php 
-                                        // Obtener TODAS las columnas de fecha del período
-                                        $fechasPeriodo = [];
-                                        if (!empty($reporteData[0])) {
-                                            foreach ($reporteData[0] as $campo => $valor) {
-                                                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $campo) || 
-                                                    preg_match('/^\d{4}\/\d{2}\/\d{2}$/', $campo) ||
-                                                    strpos($campo, '202') === 0) {
-                                                    $fechasPeriodo[] = $campo;
-                                                }
-                                            }
-                                        }
-                                        
-                                        // Ordenar fechas cronológicamente
-                                        usort($fechasPeriodo, function($a, $b) {
-                                            return strtotime($a) - strtotime($b);
-                                        });
-                                        
-                                        foreach ($fechasPeriodo as $fecha): 
-                                            $fechaFormateada = date('d/m', strtotime($fecha));
-                                            $diaSemana = date('D', strtotime($fecha));
-                                        ?>
-                                            <th class="columna-fecha" title="<?php echo $fecha; ?>">
-                                                <?php 
-                                                echo '<small>' . $fechaFormateada . '</small><br>';
-                                                echo '<small>' . $diaSemana . '</small>';
-                                                ?>
-                                            </th>
-                                        <?php endforeach; ?>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($reporteData as $fila): ?>
-                                        <?php if ($fila['Id_Empleado'] == $miIdEmpleado || $fila['Nombre'] == $user_name): ?>
-                                            <tr>
-                                                <td class="columna-principal fw-bold text-warning">
-                                                    <?php echo $fila['Id_Empleado']; ?>
-                                                </td>
-                                                <td class="columna-principal fw-bold">
-                                                    <?php echo htmlspecialchars($user_name); ?>
-                                                </td>
-                                                <td class="columna-principal">
-                                                    <span class="badge badge-total">
-                                                        <?php echo $fila['TotalConsumos'] ?? $fila['TotalConsumosCalculado'] ?? 0; ?> consumos
-                                                    </span>
-                                                </td>
-                                                <td class="columna-principal">
-                                                    <span class="badge bg-info">
-                                                        <?php echo $fila['TotalEntradas'] ?? 0; ?> entradas
-                                                    </span>
-                                                </td>
-                                                <?php 
-                                                foreach ($fechasPeriodo as $fecha): 
-                                                    $valor = $fila[$fecha] ?? 0;
-                                                    $tieneConsumo = false;
-                                                    $cantidadConsumos = 0;
-                                                    
-                                                    // Detección ROBUSTA de consumo
-                                                    if ($valor === 1 || $valor === '1' || $valor === true) {
-                                                        $tieneConsumo = true;
-                                                        $cantidadConsumos = 1;
-                                                    } elseif (is_numeric($valor) && floatval($valor) > 0) {
-                                                        $tieneConsumo = true;
-                                                        $cantidadConsumos = intval($valor);
-                                                    }
-                                                ?>
-                                                    <td class="<?php echo $tieneConsumo ? ($cantidadConsumos > 1 ? 'multi-consumo' : 'consumo-cell') : 'sin-consumo-cell'; ?>"
-                                                        title="<?php 
-                                                            if ($tieneConsumo) {
-                                                                echo $cantidadConsumos > 1 ? 
-                                                                    'Dos consumos registrados (Desayuno + Comida) - $60' : 
-                                                                    'Un consumo registrado - $30';
-                                                            } else {
-                                                                echo 'Sin consumo este día';
-                                                            }
-                                                        ?>">
-                                                        <?php if ($tieneConsumo): ?>
-                                                            <span class="badge badge-consumo">
-                                                                <i class="fas fa-utensils"></i> <?php echo $cantidadConsumos; ?>
-                                                            </span>
-                                                            <?php if ($cantidadConsumos > 1): ?>
-                                                                <div class="detalle-consumo">
-                                                                    <span class="badge badge-desayuno">D</span>
-                                                                    <span class="badge badge-comida">C</span>
-                                                                </div>
-                                                            <?php endif; ?>
-                                                        <?php else: ?>
-                                                            <span class="text-muted">-</span>
-                                                        <?php endif; ?>
-                                                    </td>
-                                                <?php endforeach; ?>
-                                            </tr>
-                                        <?php endif; ?>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0"><i class="fas fa-calendar-alt"></i> Reporte Diario</h5>
+                    <div class="position-relative">
+                        <div class="user-info-badge">
+                            <span class="fw-bold">ID: <?php echo htmlspecialchars($miIdEmpleado); ?></span>
+                            <span class="text-warning"><?php echo htmlspecialchars($user_name); ?></span>
+                        </div>
+                        <div class="scroll-hint d-none d-md-block">
+                            <i class="fas fa-arrow-right"></i>
                         </div>
                     </div>
-
-                    <!-- LEYENDA Y RESUMEN DIARIO -->
+                </div>
+                
+                <?php if (!empty($reporteData)): ?>
+                    <div class="table-responsive-container position-relative">
+                        <table class="table table-custom">
+                            <thead>
+                                <tr>
+                                    <th>Consumos</th>
+                                    <th>Entradas</th>
+                                    <th>Monto Entradas</th>
+                                    <?php 
+                                    $fechasPeriodo = [];
+                                    if (!empty($reporteData[0])) {
+                                        foreach ($reporteData[0] as $campo => $valor) {
+                                            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $campo) || 
+                                                preg_match('/^\d{4}\/\d{2}\/\d{2}$/', $campo) ||
+                                                strpos($campo, '202') === 0) {
+                                                $fechasPeriodo[] = $campo;
+                                            }
+                                        }
+                                    }
+                                    usort($fechasPeriodo, function($a, $b) {
+                                        return strtotime($a) - strtotime($b);
+                                    });
+                                    
+                                    foreach ($fechasPeriodo as $fecha): 
+                                        $fechaFormateada = date('d/m', strtotime($fecha));
+                                        $diaSemana = date('D', strtotime($fecha));
+                                        $year = date('Y', strtotime($fecha));
+                                    ?>
+                                        <th class="text-center columna-fecha" 
+                                            title="Año: <?php echo $year; ?> - <?php echo date('d/m/Y', strtotime($fecha)); ?>">
+                                            <div class="small">
+                                                <?php echo $fechaFormateada; ?><br>
+                                                <span class="badge <?php echo $year < 2026 ? 'bg-info' : 'bg-warning'; ?>" style="font-size: 0.65rem;">
+                                                    <?php echo substr($diaSemana, 0, 1); ?>
+                                                </span>
+                                            </div>
+                                        </th>
+                                    <?php endforeach; ?>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($reporteData as $fila): ?>
+                                    <?php if ($fila['Id_Empleado'] == $miIdEmpleado || $fila['Nombre'] == $user_name): ?>
+                                        <tr>
+                                            <td class="text-center">
+                                                <span class="badge-total">
+                                                    <?php echo $fila['TotalConsumos'] ?? 0; ?>
+                                                </span>
+                                            </td>
+                                            <td class="text-center">
+                                                <span class="badge bg-info">
+                                                    <?php echo $fila['TotalEntradas'] ?? 0; ?>
+                                                </span>
+                                            </td>
+                                            <td class="text-center">
+                                                <span class="badge bg-success">
+                                                    $<?php echo number_format($montoEntradas, 0); ?>
+                                                </span>
+                                            </td>
+                                            <?php 
+                                            foreach ($fechasPeriodo as $fecha): 
+                                                $valor = $fila[$fecha] ?? 0;
+                                                $tieneConsumo = false;
+                                                $cantidadConsumos = 0;
+                                                
+                                                if ($valor === 1 || $valor === '1' || $valor === true) {
+                                                    $tieneConsumo = true;
+                                                    $cantidadConsumos = 1;
+                                                } elseif (is_numeric($valor) && floatval($valor) > 0) {
+                                                    $tieneConsumo = true;
+                                                    $cantidadConsumos = intval($valor);
+                                                }
+                                                
+                                                $year = date('Y', strtotime($fecha));
+                                                $tieneEntrada = true;
+                                                $costoInfo = calcularCostoConsumo($fecha, $cantidadConsumos, $tieneEntrada);
+                                                $montoEntradaCalculado = calcularMontoEntradas($fecha, $cantidadConsumos);
+                                            ?>
+                                                <td class="text-center <?php 
+                                                    if ($tieneConsumo) {
+                                                        echo $cantidadConsumos > 1 ? 'multi-consumo' : 'consumo-cell';
+                                                        echo !$tieneEntrada ? ' sin-entrada' : '';
+                                                    } else {
+                                                        echo 'sin-consumo-cell';
+                                                    }
+                                                    echo $year < 2026 ? ' periodo-2025' : ' periodo-2026';
+                                                ?>" data-bs-toggle="tooltip" 
+                                                   data-bs-placement="top"
+                                                   title="<?php
+                                                    if ($tieneConsumo) {
+                                                        echo "<strong>" . date('d/m/Y', strtotime($fecha)) . "</strong><br>";
+                                                        echo "<strong>Consumos:</strong> " . $cantidadConsumos . "<br>";
+                                                        echo "<strong>Costo Total:</strong> $" . $costoInfo['costo_total'] . "<br>";
+                                                        echo "<strong>Monto Entrada:</strong> $" . $montoEntradaCalculado . "<br>";
+                                                        echo "<strong>Año:</strong> " . $year;
+                                                        if ($cantidadConsumos > 1) {
+                                                            echo "<br><strong>Tipo:</strong> Desayuno + Comida";
+                                                        } else {
+                                                            echo "<br><strong>Tipo:</strong> Comida";
+                                                        }
+                                                        if (!$tieneEntrada) {
+                                                            echo "<br><span class='text-danger'><strong>⚠ Sin entrada (Precio doble)</strong></span>";
+                                                        }
+                                                    } else {
+                                                        echo "<strong>" . date('d/m/Y', strtotime($fecha)) . "</strong><br>";
+                                                        echo "<span class='text-danger'><strong>No se tomó consumo este día</strong></span><br>";
+                                                        echo "<strong>Monto Entrada:</strong> $0<br>";
+                                                        echo "<strong>Año:</strong> " . $year;
+                                                    }
+                                                ?>">
+                                                    <?php if ($tieneConsumo): ?>
+                                                        <div class="d-flex flex-column align-items-center">
+                                                            <span class="badge-consumo mb-1">
+                                                                <?php echo $cantidadConsumos; ?>
+                                                            </span>
+                                                            <?php if ($cantidadConsumos > 1): ?>
+                                                                <div class="d-flex gap-1">
+                                                                    <span class="badge-desayuno">D</span>
+                                                                    <span class="badge-comida">C</span>
+                                                                </div>
+                                                            <?php endif; ?>
+                                                            <?php if (!$tieneEntrada): ?>
+                                                                <span class="badge-doble mt-1">2×</span>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    <?php else: ?>
+                                                        <span class="no-consumo-text">No</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                            <?php endforeach; ?>
+                                        </tr>
+                                    <?php endif; ?>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- RESUMEN Y LEYENDA -->
                     <div class="row mt-4">
-                        <div class="col-md-6">
-                            <div class="bg-dark rounded p-3">
-                                <h5><i class="fas fa-info-circle"></i> Leyenda</h5>
-                                <p class="mb-1">
-                                    <span class="badge badge-consumo me-2"><i class="fas fa-utensils"></i> 1</span> = Un consumo (Comida) - $30
-                                </p>
-                                <p class="mb-1">
-                                    <span class="badge multi-consumo me-2"><i class="fas fa-utensils"></i> 2</span> = Dos consumos (Desayuno + Comida) - $60
-                                </p>
-                                <p class="mb-0">
-                                    <span class="badge bg-secondary me-2">-</span> = Sin consumo ese día
-                                </p>
-                                <div class="mt-2">
-                                    <small class="text-muted">
-                                        <span class="badge badge-desayuno me-1">D</span> = Desayuno<br>
-                                        <span class="badge badge-comida me-1">C</span> = Comida
-                                    </small>
+                        <div class="col-lg-6 mb-4 mb-lg-0">
+                            <div class="glass-card">
+                                <h6 class="mb-3"><i class="fas fa-key"></i> Leyenda del Reporte</h6>
+                                <div class="resumen-dia">
+                                    <div class="d-flex align-items-center">
+                                        <div class="consumo-cell me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <span class="badge-consumo">1</span>
+                                        </div>
+                                        <div>
+                                            <strong>Con consumo</strong><br>
+                                            <small class="detalle-consumo">1 consumo registrado</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="resumen-dia">
+                                    <div class="d-flex align-items-center">
+                                        <div class="multi-consumo me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <div class="d-flex flex-column align-items-center">
+                                                <span class="badge-consumo">2</span>
+                                                <div class="d-flex gap-1 mt-1">
+                                                    <span class="badge-desayuno">D</span>
+                                                    <span class="badge-comida">C</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <strong>Dos consumos</strong><br>
+                                            <small class="detalle-consumo">Desayuno + Comida</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="resumen-dia sin-consumo-cell">
+                                    <div class="d-flex align-items-center">
+                                        <div class="sin-consumo-cell me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <span class="no-consumo-text">No</span>
+                                        </div>
+                                        <div>
+                                            <strong>Sin consumo</strong><br>
+                                            <small class="detalle-consumo">Rojo: día sin consumo registrado</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="resumen-dia sin-entrada">
+                                    <div class="d-flex align-items-center">
+                                        <div class="sin-entrada me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <div class="d-flex flex-column align-items-center">
+                                                <span class="badge-consumo">1</span>
+                                                <span class="badge-doble mt-1">2×</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <strong>Sin entrada</strong><br>
+                                            <small class="detalle-consumo">Precio doble aplicado</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="resumen-dia">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3 d-flex gap-2">
+                                            <span class="badge bg-info">2025</span>
+                                            <span class="badge bg-warning">2026</span>
+                                        </div>
+                                        <div>
+                                            <strong>Periodo de precios</strong><br>
+                                            <small class="detalle-consumo">Color indica año de aplicación</small>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="bg-dark rounded p-3">
-                                <h5><i class="fas fa-chart-pie"></i> Resumen por Día de la Semana <span class="dias-habiles">(Días Hábitos)</span></h5>
+                        
+                        <div class="col-lg-6">
+                            <div class="glass-card">
+                                <h6 class="mb-3"><i class="fas fa-chart-pie"></i> Resumen por Día de la Semana <span class="dias-habiles">(Lunes a Viernes)</span></h6>
                                 <?php
                                 $diasEsp = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
                                 $diasEng = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                                $totalGeneral = 0;
                                 
                                 for ($i = 0; $i < 5; $i++):
                                     $count = $consumosPorDia[$diasEng[$i]] ?? 0;
-                                    $detalle = $detalleConsumosPorDia[$diasEng[$i]] ?? ['desayunos' => 0, 'comidas' => 0, 'total' => 0];
+                                    $detalle = $detalleConsumosPorDia[$diasEng[$i]] ?? ['desayunos' => 0, 'comidas' => 0, 'total' => 0, 'monto' => 0];
+                                    $totalGeneral += $detalle['monto'];
                                     $porcentaje = $totalConsumos > 0 ? round(($count / $totalConsumos) * 100, 1) : 0;
                                 ?>
                                     <div class="resumen-dia <?php echo $detalle['desayunos'] > 0 ? 'multi-consumo' : ''; ?>">
                                         <div>
-                                            <strong><?php echo $diasEsp[$i]; ?>:</strong>
+                                            <strong><?php echo $diasEsp[$i]; ?></strong>
                                             <?php if ($porcentaje > 0): ?>
-                                                <small class="text-muted">(<?php echo $porcentaje; ?>%)</small>
+                                                <small class="text-muted ms-2">(<?php echo $porcentaje; ?>%)</small>
                                             <?php endif; ?>
                                             <div class="detalle-consumo">
                                                 <?php if ($detalle['desayunos'] > 0): ?>
-                                                    <span class="badge badge-desayuno me-1"><?php echo $detalle['desayunos']; ?> desayuno(s)</span>
+                                                    <span class="badge-desayuno me-1"><?php echo $detalle['desayunos']; ?> desayuno(s)</span>
                                                 <?php endif; ?>
-                                                <span class="badge badge-comida"><?php echo $detalle['comidas']; ?> comida(s)</span>
+                                                <span class="badge-comida"><?php echo $detalle['comidas']; ?> comida(s)</span>
                                             </div>
                                         </div>
-                                        <span class="badge bg-success"><?php echo $count; ?> consumos</span>
+                                        <div class="text-end">
+                                            <span class="badge bg-success"><?php echo $count; ?> consumos</span>
+                                            <div class="small text-warning mt-1">$<?php echo number_format($detalle['monto'], 2); ?></div>
+                                        </div>
                                     </div>
                                 <?php endfor; ?>
                                 
-                                <!-- Total -->
-                                <div class="resumen-dia mt-2" style="background: rgba(255, 193, 7, 0.3); border: 1px solid var(--warning);">
+                                <!-- TOTAL -->
+                                <div class="resumen-dia mt-3" style="background: rgba(255, 193, 7, 0.3); border: 1px solid var(--warning);">
                                     <div>
-                                        <strong>TOTAL:</strong>
+                                        <strong class="text-warning">TOTAL GENERAL</strong>
                                         <div class="detalle-consumo">
                                             <?php 
                                             $totalDesayunos = array_sum(array_column($detalleConsumosPorDia, 'desayunos'));
                                             $totalComidas = array_sum(array_column($detalleConsumosPorDia, 'comidas'));
                                             ?>
-                                            <span class="badge badge-desayuno me-1"><?php echo $totalDesayunos; ?> desayuno(s)</span>
-                                            <span class="badge badge-comida"><?php echo $totalComidas; ?> comida(s)</span>
+                                            <span class="badge-desayuno me-1"><?php echo $totalDesayunos; ?> desayuno(s)</span>
+                                            <span class="badge-comida"><?php echo $totalComidas; ?> comida(s)</span>
                                         </div>
                                     </div>
-                                    <span class="badge bg-warning text-dark"><?php echo $totalConsumos; ?> consumos</span>
+                                    <div class="text-end">
+                                        <span class="badge badge-total"><?php echo $totalConsumos; ?> consumos</span>
+                                        <div class="fw-bold text-warning mt-1">$<?php echo number_format($montoTotal, 2); ?></div>
+                                    </div>
                                 </div>
                                 
-                                <!-- Nota sobre días hábiles -->
-                                <div class="mt-2 text-center">
+                                <div class="mt-3">
+                                    <div class="resumen-dia" style="background: rgba(23, 162, 184, 0.2);">
+                                        <div>
+                                            <strong class="text-info">MONTO ENTRADAS</strong><br>
+                                            <small class="detalle-consumo">Total con descuento aplicado</small>
+                                        </div>
+                                        <div class="text-end">
+                                            <div class="fw-bold text-info">$<?php echo number_format($montoEntradas, 2); ?></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-3 text-center">
                                     <small class="text-muted">
-                                        <i class="fas fa-info-circle"></i> Solo se consideran días hábiles (Lunes a Viernes)
+                                        <i class="fas fa-info-circle me-1"></i>
+                                        Solo se consideran días hábiles (Lunes a Viernes)
                                     </small>
                                 </div>
                             </div>
                         </div>
                     </div>
-
+                    
                 <?php else: ?>
-                    <div class="alert alert-warning text-center">
-                        <i class="fas fa-exclamation-triangle"></i> No se encontraron datos para tu usuario en el período seleccionado.
-                        <?php if (isset($errorQuery)): ?>
-                            <br><small class="text-muted">Error: <?php echo $errorQuery; ?></small>
-                        <?php endif; ?>
+                    <div class="text-center py-5">
+                        <div class="mb-4">
+                            <i class="fas fa-database fa-3x text-muted"></i>
+                        </div>
+                        <h5 class="mb-3">No se encontraron registros</h5>
+                        <p class="text-muted mb-4">
+                            No hay datos de consumo para el período seleccionado.
+                            <?php if (isset($errorQuery)): ?>
+                                <br><small class="text-danger">Error: <?php echo $errorQuery; ?></small>
+                            <?php endif; ?>
+                        </p>
+                        <a href="?" class="btn btn-gold">
+                            <i class="fas fa-redo me-2"></i> Volver al inicio
+                        </a>
                     </div>
                 <?php endif; ?>
             </div>
-
+            
+            <!-- PIE DE PÁGINA -->
+            <div class="text-center mt-4">
+                <small class="text-muted">
+                    <i class="fas fa-copyright me-1"></i>
+                    Sistema de Reportes BACROCORP • <?php echo date('Y'); ?>
+                </small>
+            </div>
+            
         <?php endif; ?>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Inicializar tooltips de Bootstrap
+        document.addEventListener('DOMContentLoaded', function() {
+            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl, {
+                    html: true,
+                    trigger: 'hover',
+                    placement: 'top'
+                });
+            });
+        });
+        
+        // Mostrar/ocultar hint de scroll
+        function toggleScrollHint() {
+            const hint = document.querySelector('.scroll-hint');
+            const tableContainer = document.querySelector('.table-responsive-container');
+            
+            if (hint && tableContainer) {
+                if (tableContainer.scrollWidth > tableContainer.clientWidth) {
+                    hint.style.display = 'flex';
+                } else {
+                    hint.style.display = 'none';
+                }
+            }
+        }
+        
+        // Configurar al cargar
+        window.addEventListener('load', function() {
+            toggleScrollHint();
+            
+            // Ocultar hint después de 5 segundos
+            setTimeout(function() {
+                const hint = document.querySelector('.scroll-hint');
+                if (hint) {
+                    hint.style.display = 'none';
+                }
+            }, 5000);
+        });
+        
+        // Reconfigurar al redimensionar
+        window.addEventListener('resize', function() {
+            toggleScrollHint();
+        });
+    </script>
 </body>
 </html>

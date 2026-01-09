@@ -770,6 +770,8 @@ if ($num_semana_seleccionada > 0) {
       --semana-2: #10b981;
       --semana-3: #8b5cf6;
       --semana-4: #f59e0b;
+      --gold-gradient: linear-gradient(135deg, #FFD700 0%, #FFC700 25%, #FFAA00 50%, #FF8C00 75%, #FF6B00 100%);
+      --silver-gradient: linear-gradient(135deg, #C0C0C0 0%, #D3D3D3 25%, #E8E8E8 50%, #F0F0F0 75%, #F8F8F8 100%);
     }
 
     * {
@@ -974,6 +976,9 @@ if ($num_semana_seleccionada > 0) {
       padding: 35px;
       box-shadow: var(--glass-shadow);
       transition: transform 0.3s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
 
     form:hover {
@@ -985,6 +990,7 @@ if ($num_semana_seleccionada > 0) {
       grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
       gap: 20px;
       margin-bottom: 35px;
+      width: 100%;
     }
 
     .day-card {
@@ -1102,6 +1108,166 @@ if ($num_semana_seleccionada > 0) {
       font-size: 1rem;
       min-width: 20px;
       text-align: center;
+    }
+
+    /* ==================================================
+       ESTILO PREMIUM PARA EL BOTÓN DE CONFIRMACIÓN
+       ================================================== */
+
+    .submit-button-container {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      margin-top: 20px;
+      position: relative;
+    }
+
+    #submitBtn {
+      background: var(--gold-gradient);
+      color: #000;
+      border: none;
+      border-radius: 50px;
+      padding: 22px 50px;
+      font-size: 1.3rem;
+      font-weight: 700;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 15px;
+      position: relative;
+      overflow: hidden;
+      z-index: 1;
+      box-shadow: 
+        0 10px 30px rgba(255, 215, 0, 0.4),
+        0 0 0 2px rgba(255, 255, 255, 0.1),
+        inset 0 2px 10px rgba(255, 255, 255, 0.5),
+        inset 0 -2px 10px rgba(0, 0, 0, 0.2);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      min-width: 350px;
+      text-shadow: 0 1px 1px rgba(255, 255, 255, 0.3);
+    }
+
+    #submitBtn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, 
+          rgba(255, 255, 255, 0.2) 0%,
+          rgba(255, 255, 255, 0) 50%,
+          rgba(255, 255, 255, 0.2) 100%);
+      border-radius: 50px;
+      z-index: -1;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+
+    #submitBtn::after {
+      content: '';
+      position: absolute;
+      top: -2px;
+      left: -2px;
+      right: -2px;
+      bottom: -2px;
+      background: var(--gold-gradient);
+      border-radius: 52px;
+      z-index: -2;
+      filter: blur(10px);
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+
+    #submitBtn:hover {
+      transform: translateY(-5px) scale(1.03);
+      box-shadow: 
+        0 15px 40px rgba(255, 215, 0, 0.6),
+        0 0 0 3px rgba(255, 255, 255, 0.2),
+        inset 0 2px 15px rgba(255, 255, 255, 0.6),
+        inset 0 -2px 15px rgba(0, 0, 0, 0.3);
+      letter-spacing: 2px;
+    }
+
+    #submitBtn:hover::before {
+      opacity: 1;
+    }
+
+    #submitBtn:hover::after {
+      opacity: 0.5;
+    }
+
+    #submitBtn:active {
+      transform: translateY(-2px) scale(0.98);
+      transition: all 0.1s ease;
+      box-shadow: 
+        0 5px 20px rgba(255, 215, 0, 0.3),
+        0 0 0 2px rgba(255, 255, 255, 0.1),
+        inset 0 2px 5px rgba(255, 255, 255, 0.4),
+        inset 0 -2px 5px rgba(0, 0, 0, 0.3);
+    }
+
+    #submitBtn:disabled {
+      background: var(--silver-gradient);
+      transform: none;
+      cursor: not-allowed;
+      opacity: 0.7;
+      box-shadow: 
+        0 5px 15px rgba(192, 192, 192, 0.2),
+        0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    #submitBtn:disabled:hover {
+      transform: none;
+      box-shadow: 
+        0 5px 15px rgba(192, 192, 192, 0.2),
+        0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    #submitBtn i {
+      font-size: 1.5rem;
+      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.2));
+      transition: transform 0.3s ease;
+    }
+
+    #submitBtn:hover i {
+      transform: scale(1.2) rotate(5deg);
+    }
+
+    #submitBtn:disabled i {
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .button-shine {
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: linear-gradient(
+        45deg,
+        transparent 30%,
+        rgba(255, 255, 255, 0.3) 50%,
+        transparent 70%
+      );
+      transform: rotate(30deg);
+      animation: shine 3s infinite linear;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    @keyframes shine {
+      0% { transform: translateX(-100%) translateY(-100%) rotate(30deg); }
+      100% { transform: translateX(100%) translateY(100%) rotate(30deg); }
     }
 
     .notification {
@@ -1229,6 +1395,12 @@ if ($num_semana_seleccionada > 0) {
         grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
       }
 
+      #submitBtn {
+        min-width: 300px;
+        padding: 18px 40px;
+        font-size: 1.2rem;
+      }
+
       .logo-corner {
         position: relative;
         top: auto;
@@ -1266,6 +1438,17 @@ if ($num_semana_seleccionada > 0) {
       
       .meal-item {
         font-size: 0.85rem;
+      }
+
+      #submitBtn {
+        min-width: 250px;
+        padding: 16px 30px;
+        font-size: 1.1rem;
+        letter-spacing: 1px;
+      }
+
+      #submitBtn i {
+        font-size: 1.3rem;
       }
     }
   </style>
@@ -1414,9 +1597,13 @@ if ($num_semana_seleccionada > 0) {
     <?php endforeach; ?>
   </div>
 
-  <button type="submit" id="submitBtn">
-    <i class="fas fa-check-circle"></i> Confirmar Pedido Semanal
-  </button>
+  <!-- Contenedor del botón premium -->
+  <div class="submit-button-container">
+    <button type="submit" id="submitBtn">
+      <i class="fas fa-check-circle"></i> Confirmar Pedido Semanal
+      <div class="button-shine"></div>
+    </button>
+  </div>
 </form>
 
 <script>
@@ -1527,6 +1714,30 @@ if ($num_semana_seleccionada > 0) {
       }
     }
   });
+
+  // Efecto de brillo aleatorio en el botón
+  const buttonShine = document.querySelector('.button-shine');
+  if (buttonShine) {
+    setInterval(() => {
+      buttonShine.style.animation = 'none';
+      setTimeout(() => {
+        buttonShine.style.animation = 'shine 3s infinite linear';
+      }, 10);
+    }, 10000); // Cambia el brillo cada 10 segundos
+  }
+
+  // Efecto de pulsación sutil
+  setInterval(() => {
+    const submitBtn = document.getElementById('submitBtn');
+    if (!submitBtn.disabled) {
+      submitBtn.style.transform = 'translateY(-2px) scale(1.01)';
+      setTimeout(() => {
+        if (!submitBtn.disabled) {
+          submitBtn.style.transform = '';
+        }
+      }, 300);
+    }
+  }, 5000); // Pulsa cada 5 segundos
 </script>
 
 </body>

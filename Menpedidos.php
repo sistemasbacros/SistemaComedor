@@ -298,7 +298,7 @@
   <div class="form-group">
     <label for="Nempleado"><i class="fas fa-id-badge"></i> Número de empleado</label>
     <select name="Nempleado" id="Nempleado" required>
-      <?php for ($i = 1; $i <= 1200; $i++): ?>
+      <?php for ($i = 1; $i <= 1225; $i++): ?>
         <option value="<?= $i ?>"><?= $i ?></option>
       <?php endfor; ?>
     </select>

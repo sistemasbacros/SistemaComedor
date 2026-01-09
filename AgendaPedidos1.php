@@ -4,6 +4,7 @@ session_start();
 // Obtener información del usuario desde la sesión
 $user_name = $_SESSION['user_name'] ?? '';
 $user_area = $_SESSION['user_area'] ?? '';
+$user_id = $_SESSION['user_id'] ?? '';
 
 // Si no hay sesión activa, redirigir al login
 if (empty($user_name)) {
@@ -14,16 +15,15 @@ if (empty($user_name)) {
 // Función para obtener todos los lunes entre dos fechas
 function obtenerLunes($fecha_inicio = null, $fecha_fin = null) {
     if ($fecha_inicio === null) {
-        $fecha_inicio = date('Y-m-d'); // Hoy
+        $fecha_inicio = date('Y-m-d');
     }
     if ($fecha_fin === null) {
-        $fecha_fin = date('Y-m-d', strtotime('+2 months')); // Dos meses después
+        $fecha_fin = date('Y-m-d', strtotime('+2 months'));
     }
     
     $lunes = [];
     $fecha_actual = date('Y-m-d', strtotime('monday this week', strtotime($fecha_inicio)));
     
-    // Agregar todos los lunes hasta la fecha fin
     while (strtotime($fecha_actual) <= strtotime($fecha_fin)) {
         $lunes[] = $fecha_actual;
         $fecha_actual = date('Y-m-d', strtotime($fecha_actual . ' +1 week'));
@@ -32,101 +32,174 @@ function obtenerLunes($fecha_inicio = null, $fecha_fin = null) {
     return $lunes;
 }
 
-// Función para filtrar lunes: mantener solo la semana en curso y futuras
+// Función para filtrar lunes
 function filtrarLunesPasados($lunes_array) {
     $lunes_filtrados = [];
     $hoy = date('Y-m-d');
     $lunes_semana_actual = date('Y-m-d', strtotime('monday this week'));
     
     foreach ($lunes_array as $lunes) {
-        // Siempre incluir el lunes de la semana en curso
         if ($lunes == $lunes_semana_actual) {
             $lunes_filtrados[] = $lunes;
-        }
-        // Incluir lunes futuros
-        elseif (strtotime($lunes) > strtotime($hoy)) {
+        } elseif (strtotime($lunes) > strtotime($hoy)) {
             $lunes_filtrados[] = $lunes;
         }
-        // Para lunes pasados (que no son de esta semana), no incluirlos
     }
     
     return $lunes_filtrados;
 }
 
-// Obtener lunes desde la semana en curso hasta 2 meses después
+// Obtener lunes
 $lunes_todos = obtenerLunes();
-// Filtrar para quitar lunes pasados (excepto el de la semana en curso)
 $lunes_filtrados = filtrarLunesPasados($lunes_todos);
-
-// Obtener fecha actual para la semana en curso
-$fecha_actual = date('Y-m-d');
 $lunes_semana_actual = date('Y-m-d', strtotime('monday this week'));
 
+// Conexión a SQL Server
 $serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+$connectionInfo = array(
+    "Database" => "Comedor", 
+    "UID" => "Larome03", 
+    "PWD" => "Larome03",
+    "CharacterSet" => "UTF-8",
+    "ReturnDatesAsStrings" => true
+);
 
-// Variables para almacenar resultados
+$conn = sqlsrv_connect($serverName, $connectionInfo);
+
+if (!$conn) {
+    die("Error de conexión: " . print_r(sqlsrv_errors(), true));
+}
+
+// Variables
 $resultados_tabla = [];
 $total_consumos = 0;
-$fecha_consulta = $lunes_semana_actual; // Por defecto semana en curso
+$fecha_consulta = $lunes_semana_actual;
 
-// Determinar qué fecha usar para la consulta
+// Determinar fecha de consulta
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fec']) && !empty($_POST['fec'])) {
-    // Si se envió una fecha por POST, usar esa
-    $fecha_consulta = test_input($_POST['fec']);
-} else {
-    // Si no hay POST, usar la semana en curso por defecto
-    $fecha_consulta = $lunes_semana_actual;
+    $fecha_consulta = $_POST['fec'];
 }
 
-// Realizar consulta con el nombre de usuario de la sesión
+// DEBUG: Variable para mensajes
+$debug_messages = [];
+
+// Realizar consulta
 if (!empty($user_name) && !empty($fecha_consulta)) {
-    // Query dinámico basado en el nombre de usuario y fecha
-    $sql_dinamico = "SELECT Fecha, c.Id_Empleado, Nombre, 
-                    ISNULL(Lunes, '') as Lunes, 
-                    ISNULL(Martes, '') as Martes, 
-                    ISNULL(Miercoles, '') as Miercoles,
-                    ISNULL(Jueves, '') as Jueves,
-                    ISNULL(Viernes, '') as Viernes 
-                    FROM (SELECT Id_Empleado, Nombre, Area 
-                          FROM [dbo].[Catalogo_EmpArea] 
-                          WHERE Nombre = ?) as a
-                    LEFT JOIN
-                    (SELECT * FROM [dbo].[PedidosComida] WHERE Fecha = ?) as c
-                    ON a.Id_Empleado = c.Id_Empleado";
+    $debug_messages[] = "Buscando consumos para: $user_name en fecha: $fecha_consulta";
     
-    $params = array($user_name, $fecha_consulta);
-    $stmt_dinamico = sqlsrv_query($conn, $sql_dinamico, $params);
+    // Obtener ID del empleado
+    $sql_id = "SELECT Id_Empleado FROM [dbo].[Catalogo_EmpArea] WHERE Nombre = ?";
+    $params_id = array($user_name);
+    $stmt_id = sqlsrv_query($conn, $sql_id, $params_id);
     
-    if ($stmt_dinamico === false) {
-        die(print_r(sqlsrv_errors(), true));
+    if ($stmt_id === false) {
+        $debug_messages[] = "ERROR en consulta de ID: " . print_r(sqlsrv_errors(), true);
+    } else {
+        if ($row_id = sqlsrv_fetch_array($stmt_id, SQLSRV_FETCH_ASSOC)) {
+            $user_id = $row_id['Id_Empleado'];
+            $debug_messages[] = "ID encontrado: $user_id";
+            
+            // DEPURACIÓN: Verificar qué datos hay en la tabla para este empleado
+            $sql_debug = "SELECT * FROM [dbo].[PedidosComida] WHERE Id_Empleado = ? AND Fecha = ?";
+            $params_debug = array($user_id, $fecha_consulta);
+            $stmt_debug = sqlsrv_query($conn, $sql_debug, $params_debug);
+            
+            if ($stmt_debug === false) {
+                $debug_messages[] = "ERROR en consulta de depuración: " . print_r(sqlsrv_errors(), true);
+            } else {
+                $debug_data = [];
+                while ($row_debug = sqlsrv_fetch_array($stmt_debug, SQLSRV_FETCH_ASSOC)) {
+                    $debug_data[] = $row_debug;
+                }
+                $debug_messages[] = "Registros encontrados en PedidosComida: " . count($debug_data);
+                if (!empty($debug_data)) {
+                    $debug_messages[] = "Datos crudos: " . json_encode($debug_data, JSON_PRETTY_PRINT);
+                }
+                sqlsrv_free_stmt($stmt_debug);
+            }
+            
+            // Consulta principal para obtener consumos
+            $sql_consumos = "SELECT Lunes, Martes, Miercoles, Jueves, Viernes 
+                           FROM [dbo].[PedidosComida] 
+                           WHERE Id_Empleado = ? AND Fecha = ?";
+            
+            $params_consumos = array($user_id, $fecha_consulta);
+            $stmt_consumos = sqlsrv_query($conn, $sql_consumos, $params_consumos);
+            
+            if ($stmt_consumos === false) {
+                $debug_messages[] = "ERROR en consulta de consumos: " . print_r(sqlsrv_errors(), true);
+            } else {
+                $debug_messages[] = "Consulta de consumos ejecutada correctamente";
+                
+                // Procesar resultados
+                $registros = [];
+                $num_registros = 0;
+                
+                while ($row = sqlsrv_fetch_array($stmt_consumos, SQLSRV_FETCH_ASSOC)) {
+                    $registros[] = $row;
+                    $num_registros++;
+                    
+                    // DEBUG: Mostrar datos de cada registro
+                    $debug_messages[] = "Registro $num_registros - Lunes: " . ($row['Lunes'] ?? 'NULL') . 
+                                      ", Martes: " . ($row['Martes'] ?? 'NULL') . 
+                                      ", Miércoles: " . ($row['Miercoles'] ?? 'NULL') . 
+                                      ", Jueves: " . ($row['Jueves'] ?? 'NULL') . 
+                                      ", Viernes: " . ($row['Viernes'] ?? 'NULL');
+                }
+                
+                $debug_messages[] = "Total de registros encontrados: $num_registros";
+                
+                if (!empty($registros)) {
+                    // Combinar registros en uno solo
+                    $dias = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes'];
+                    $registro_combinado = ['Fecha' => $fecha_consulta];
+                    
+                    foreach ($dias as $dia) {
+                        $consumos_dia = [];
+                        
+                        foreach ($registros as $registro) {
+                            if (!empty($registro[$dia]) && trim($registro[$dia]) != '') {
+                                $valor = trim($registro[$dia]);
+                                $debug_messages[] = "Día $dia tiene valor: '$valor'";
+                                
+                                // Asegurarse de que el valor sea correcto
+                                if (strtoupper($valor) === 'DESAYUNO' || strtoupper($valor) === 'COMIDA' || 
+                                    $valor === 'Desayuno' || $valor === 'Comida') {
+                                    $consumos_dia[] = ucfirst(strtolower($valor));
+                                } else {
+                                    $consumos_dia[] = $valor;
+                                }
+                            }
+                        }
+                        
+                        // Eliminar duplicados
+                        $consumos_dia = array_unique($consumos_dia);
+                        
+                        if (!empty($consumos_dia)) {
+                            $registro_combinado[$dia] = implode(', ', $consumos_dia);
+                            $total_consumos += count($consumos_dia);
+                            $debug_messages[] = "$dia combinado: " . $registro_combinado[$dia];
+                        } else {
+                            $registro_combinado[$dia] = '';
+                            $debug_messages[] = "$dia: Sin consumo";
+                        }
+                    }
+                    
+                    $resultados_tabla[] = $registro_combinado;
+                    $debug_messages[] = "Registro combinado creado exitosamente";
+                }
+                
+                sqlsrv_free_stmt($stmt_consumos);
+            }
+        } else {
+            $debug_messages[] = "NO se encontró ID para el usuario: $user_name";
+        }
+        sqlsrv_free_stmt($stmt_id);
     }
-    
-    // Procesar resultados
-    while ($row = sqlsrv_fetch_array($stmt_dinamico, SQLSRV_FETCH_ASSOC)) {
-        $resultados_tabla[] = $row;
-        
-        // Calcular total de consumos para esta fila
-        $consumos_semana = 0;
-        if (!empty($row['Lunes']) && ($row['Lunes'] === 'Desayuno' || $row['Lunes'] === 'Comida')) $consumos_semana++;
-        if (!empty($row['Martes']) && ($row['Martes'] === 'Desayuno' || $row['Martes'] === 'Comida')) $consumos_semana++;
-        if (!empty($row['Miercoles']) && ($row['Miercoles'] === 'Desayuno' || $row['Miercoles'] === 'Comida')) $consumos_semana++;
-        if (!empty($row['Jueves']) && ($row['Jueves'] === 'Desayuno' || $row['Jueves'] === 'Comida')) $consumos_semana++;
-        if (!empty($row['Viernes']) && ($row['Viernes'] === 'Desayuno' || $row['Viernes'] === 'Comida')) $consumos_semana++;
-        
-        $total_consumos += $consumos_semana;
-    }
-    
-    sqlsrv_free_stmt($stmt_dinamico);
 }
 
-function test_input($data) {
-    $data = trim($data);
-    $data = stripslashes($data);
-    $data = htmlspecialchars($data);
-    return $data;
-}
+// Mostrar debug si hay parámetro en URL
+$show_debug = isset($_GET['debug']) && $_GET['debug'] == '1';
 ?>
 
 <!DOCTYPE html>
@@ -134,7 +207,7 @@ function test_input($data) {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Comedor Corporativo</title>
+    <title>Comedor Corporativo - Mis Consumos</title>
 
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -142,26 +215,16 @@ function test_input($data) {
     <!-- Bootstrap 5 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
-    <!-- DataTables -->
-    <link href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <style>
-        /* Tus estilos CSS se mantienen igual */
         :root {
             --primary: #1a3a6c;
             --primary-dark: #0d254a;
             --glass-bg: rgba(255, 255, 255, 0.08);
             --glass-border: rgba(255, 255, 255, 0.12);
-            --glass-glow: rgba(255, 255, 255, 0.18);
             --text-light: #f0f8ff;
-            --shadow: 0 12px 32px rgba(0, 10, 30, 0.4);
-        }
-
-        * {
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
         }
 
         body {
@@ -169,54 +232,16 @@ function test_input($data) {
             min-height: 100vh;
             padding: 2rem 1rem;
             color: var(--text-light);
-            overflow-x: hidden;
+            font-family: 'Inter', sans-serif;
         }
 
         .glass-card {
             background: var(--glass-bg);
             backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
             border: 1px solid var(--glass-border);
             border-radius: 24px;
-            box-shadow: 
-                var(--shadow),
-                0 0 0 1px var(--glass-glow),
-                inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-            padding: 2.25rem;
+            padding: 2rem;
             margin-bottom: 2rem;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .glass-card::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            right: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%);
-            pointer-events: none;
-        }
-
-        .logo-container {
-            text-align: center;
-            margin-bottom: 1.8rem;
-        }
-
-        .logo-container img {
-            max-width: 130px;
-            height: auto;
-            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
-        }
-
-        h1 {
-            font-weight: 700;
-            text-align: center;
-            margin-bottom: 2.2rem;
-            font-size: 2.1rem;
-            text-shadow: 0 2px 6px rgba(0,0,0,0.3);
-            letter-spacing: -0.5px;
         }
 
         .user-info {
@@ -224,43 +249,63 @@ function test_input($data) {
             border-radius: 16px;
             padding: 1rem 1.5rem;
             margin-bottom: 1.5rem;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(8px);
         }
 
-        .user-name {
+        .table {
+            background: rgba(255, 255, 255, 0.94);
+            border-radius: 16px;
+            overflow: hidden;
+            margin-top: 1.5rem;
+        }
+
+        .table th {
+            background: var(--primary-dark) !important;
+            color: white !important;
             font-weight: 700;
-            font-size: 1.2rem;
-            color: #e0f0ff;
+            padding: 1rem;
+            text-align: center;
         }
 
-        .user-area {
-            font-weight: 500;
-            font-size: 1rem;
-            color: #b8d4ff;
-            margin-top: 0.3rem;
-        }
-
-        .form-label {
+        .table td {
             font-weight: 600;
-            color: #e0f0ff;
-            margin-top: 1.1rem;
+            color: #222 !important;
+            padding: 1rem;
+            text-align: center;
+            vertical-align: middle;
         }
 
-        .form-control, .form-select {
-            background: rgba(255, 255, 255, 0.92);
-            border: none;
-            border-radius: 14px;
-            padding: 0.85rem 1.1rem;
-            font-size: 1.02rem;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-            transition: all 0.3s ease;
+        .consumo-celda {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+            justify-content: center;
+            min-height: 80px;
         }
 
-        .form-control:focus, .form-select:focus {
-            outline: none;
-            box-shadow: 0 0 0 3px rgba(45, 109, 166, 0.4);
-            transform: translateY(-1px);
+        .desayuno-texto {
+            color: #1565c0;
+            font-weight: 700;
+            background: #e3f2fd;
+            padding: 5px 15px;
+            border-radius: 20px;
+            border: 1px solid #bbdefb;
+            width: 120px;
+        }
+
+        .comida-texto {
+            color: #2e7d32;
+            font-weight: 700;
+            background: #e8f5e9;
+            padding: 5px 15px;
+            border-radius: 20px;
+            border: 1px solid #c8e6c9;
+            width: 120px;
+        }
+
+        .empty-cell {
+            color: #999 !important;
+            font-style: italic;
         }
 
         .btn-primary {
@@ -269,61 +314,7 @@ function test_input($data) {
             border-radius: 14px;
             padding: 0.85rem 1.8rem;
             font-weight: 700;
-            font-size: 1.15rem;
-            letter-spacing: 0.5px;
-            transition: all 0.35s cubic-bezier(0.2, 0, 0.2, 1);
-            box-shadow: 
-                0 6px 16px rgba(0, 0, 0, 0.25),
-                0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #3a7db6, #2a5e8a);
-            transform: translateY(-3px);
-            box-shadow: 
-                0 10px 24px rgba(0, 0, 0, 0.35),
-                0 6px 12px rgba(0, 0, 0, 0.25);
-        }
-
-        .btn-primary:active {
-            transform: translateY(-1px);
-        }
-
-        #NC {
-            font-size: 1.35rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #1E4E79, #2D6DA6);
-            padding: 0.9rem 1.8rem;
-            border-radius: 16px;
-            display: inline-block;
-            margin-top: 1.8rem;
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
-            letter-spacing: 0.3px;
-        }
-
-        .table {
-            background: rgba(255, 255, 255, 0.94);
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-        }
-
-        .table th {
-            background: var(--primary-dark) !important;
-            color: white !important;
-            font-weight: 700;
-            font-size: 0.98rem;
-            padding: 1rem;
-        }
-
-        .table td {
-            font-weight: 600;
-            color: #222 !important;
-            padding: 0.9rem;
-        }
-
-        .table-striped tbody tr:nth-of-type(odd) {
-            background-color: rgba(245, 249, 255, 0.65);
+            width: 100%;
         }
 
         .nav-link {
@@ -335,49 +326,28 @@ function test_input($data) {
             background: rgba(255, 255, 255, 0.12);
             display: inline-block;
             margin-bottom: 1.8rem;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
             margin-right: 1rem;
         }
 
-        .nav-link:hover {
-            background: rgba(255, 255, 255, 0.22);
-            color: white;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-        }
-
-        .nav-buttons {
-            text-align: center;
-            margin-bottom: 1.8rem;
-        }
-
-        .alert-info {
+        .info-header {
             background: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 12px;
             color: var(--text-light);
-            padding: 1rem;
-            margin-bottom: 1rem;
+            padding: 1.2rem;
+            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
         }
 
-        @media (max-width: 768px) {
-            .glass-card {
-                padding: 1.6rem;
-            }
-            h1 {
-                font-size: 1.7rem;
-            }
-            .btn-primary {
-                font-size: 1.05rem;
-                padding: 0.8rem 1.5rem;
-            }
-            .nav-link {
-                display: block;
-                margin-right: 0;
-                margin-bottom: 0.8rem;
-            }
+        .debug-panel {
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+            color: white;
+            font-family: monospace;
+            font-size: 0.9rem;
+            max-height: 400px;
+            overflow-y: auto;
         }
     </style>
 </head>
@@ -385,142 +355,162 @@ function test_input($data) {
 <body>
     <div class="container">
         <!-- Enlaces de navegación -->
-        <div class="nav-buttons">
-            <a href="http://192.168.100.95/Comedor" class="nav-link">← Menú principal</a>
-            <a href="http://desarollo-bacros/Comedor/FormatCancel.php" class="nav-link">📅 Cancelaciones</a>
+        <div class="text-center mb-4">
+            <a href="http://192.168.100.95/Comedor" class="nav-link">
+                <i class="fas fa-home"></i> Menú principal
+            </a>
+            <a href="http://desarollo-bacros/Comedor/FormatCancel.php" class="nav-link">
+                <i class="fas fa-calendar-times"></i> Cancelaciones
+            </a>
+           
         </div>
 
         <!-- Logo -->
-        <div class="logo-container">
-            <img src="Logo2.png" alt="Logo">
+        <div class="text-center mb-4">
+            <img src="Logo2.png" alt="Logo" style="max-width: 130px;">
         </div>
 
         <!-- Información del usuario -->
         <div class="user-info">
-            <div class="user-name">👤 <?php echo htmlspecialchars($user_name); ?></div>
-            <div class="user-area">🏢 <?php echo htmlspecialchars($user_area); ?></div>
+            <div class="mb-2">
+                <i class="fas fa-user"></i> <strong><?php echo htmlspecialchars($user_name); ?></strong>
+            </div>
+            <div class="mb-2">
+                <i class="fas fa-id-card"></i> ID: <?php echo htmlspecialchars($user_id); ?>
+            </div>
+            <div>
+                <i class="fas fa-building"></i> <?php echo htmlspecialchars($user_area); ?>
+            </div>
         </div>
 
         <!-- Título -->
-        <h1>Consulta de Consumos Semanales</h1>
+        <h1 class="text-center mb-4"><i class="fas fa-utensils"></i> Consulta de Consumos Semanales</h1>
 
         <!-- Formulario -->
         <div class="glass-card">
             <form method="POST" action="">
-                <div class="row g-3">
-                    <div class="col-md-12">
-                        <label for="fec" class="form-label">Selecciona la semana a consultar</label>
-                        <select name="fec" id="fec" class="form-select" required>
-                            <option value="">Selecciona una fecha</option>
-                            <?php foreach ($lunes_filtrados as $lunes): 
-                                $fecha_formateada = date('d/m/Y', strtotime($lunes));
-                                $selected = '';
-                                if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fec'])) {
-                                    $selected = ($_POST['fec'] == $lunes) ? 'selected' : '';
-                                } else {
-                                    $selected = ($lunes == $lunes_semana_actual) ? 'selected' : '';
-                                }
-                            ?>
-                                <option value="<?php echo $lunes; ?>" <?php echo $selected; ?>>
-                                    <?php echo $fecha_formateada; ?>
-                                    <?php echo ($lunes == $lunes_semana_actual) ? '(Semana en curso)' : ''; ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <?php if (empty($lunes_filtrados)): ?>
-                            <div class="alert alert-warning mt-2">
-                                No hay semanas disponibles para consultar.
-                            </div>
-                        <?php endif; ?>
-                    </div>
+                <div class="mb-3">
+                    <label class="form-label">
+                        <i class="fas fa-calendar-alt"></i> Selecciona la semana a consultar
+                    </label>
+                    <select name="fec" id="fec" class="form-select" required>
+                        <option value="">Selecciona una fecha</option>
+                        <?php foreach ($lunes_filtrados as $lunes): 
+                            $fecha_formateada = date('d/m/Y', strtotime($lunes));
+                            $selected = ($fecha_consulta == $lunes) ? 'selected' : '';
+                        ?>
+                            <option value="<?php echo $lunes; ?>" <?php echo $selected; ?>>
+                                <?php echo $fecha_formateada; ?>
+                                <?php echo ($lunes == $lunes_semana_actual) ? ' (Semana en curso)' : ''; ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
 
-                <div class="d-grid mt-4">
-                    <button type="submit" class="btn btn-primary">Buscar Consumos</button>
-                </div>
+                <button type="submit" class="btn btn-primary mb-3">
+                    <i class="fas fa-search"></i> Buscar Consumos
+                </button>
 
                 <?php if (!empty($resultados_tabla)): ?>
-                    <div id="NC" class="mt-4 text-center">
-                        Tienes <?php echo $total_consumos; ?> consumos para esta semana
+                    <div class="alert alert-info text-center">
+                        <i class="fas fa-chart-bar"></i> Tienes <?php echo $total_consumos; ?> consumos para esta semana
                     </div>
                 <?php else: ?>
-                    <div id="NC" class="mt-4 text-center">
-                        <?php echo empty($resultados_tabla) ? 'No se encontraron consumos para esta semana' : 'No. consumos semanales:'; ?>
+                    <div class="alert alert-warning text-center">
+                        <i class="fas fa-info-circle"></i> 
+                        <?php echo ($_SERVER['REQUEST_METHOD'] === 'POST') ? 
+                            'No se encontraron consumos para esta semana' : 
+                            'Selecciona una semana para consultar'; ?>
                     </div>
                 <?php endif; ?>
             </form>
         </div>
 
         <!-- Tabla -->
+        <?php if (!empty($resultados_tabla)): ?>
         <div class="glass-card">
-            <?php if (!empty($resultados_tabla)): ?>
-                <div class="alert alert-info">
-                    Mostrando consumos para: <strong><?php echo htmlspecialchars($user_name); ?></strong> - 
-                   <strong><?php echo date('d/m/Y', strtotime($fecha_consulta)); ?></strong>
-                </div>
-                
-                <div class="table-responsive">
-                    <table id="example" class="table table-striped table-bordered w-100">
-                        <thead>
+            <!-- ENCABEZADO CON ID DEL EMPLEADO -->
+            <div class="info-header">
+                <i class="fas fa-user-check"></i> Mostrando consumos para: 
+                <strong><?php echo htmlspecialchars($user_name); ?> (ID: <?php echo htmlspecialchars($user_id); ?>)</strong> - 
+                <strong><?php echo date('d/m/Y', strtotime($fecha_consulta)); ?></strong>
+            </div>
+            
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Semana</th>
+                            <th>Lunes</th>
+                            <th>Martes</th>
+                            <th>Miércoles</th>
+                            <th>Jueves</th>
+                            <th>Viernes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($resultados_tabla as $fila): ?>
                             <tr>
-                                <th>Fecha</th>
-                                <th>Id_Empleado</th>
-                                <th>Nombre</th>
-                                <th>Lunes</th>
-                                <th>Martes</th>
-                                <th>Miércoles</th>
-                                <th>Jueves</th>
-                                <th>Viernes</th>
+                                <td style="font-weight: 700; color: var(--primary-dark) !important;">
+                                    <?php echo date('d/m/Y', strtotime($fila['Fecha'])); ?>
+                                </td>
+                                
+                                <?php 
+                                $dias = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes'];
+                                foreach ($dias as $dia): 
+                                ?>
+                                    <td>
+                                        <div class="consumo-celda">
+                                            <?php 
+                                            if (!empty($fila[$dia])) {
+                                                $consumos = explode(', ', $fila[$dia]);
+                                                
+                                                foreach ($consumos as $consumo) {
+                                                    $consumo_limpio = trim($consumo);
+                                                    if (strtoupper($consumo_limpio) === 'DESAYUNO' || $consumo_limpio === 'Desayuno') {
+                                                        echo '<div class="desayuno-texto">DESAYUNO</div>';
+                                                    } elseif (strtoupper($consumo_limpio) === 'COMIDA' || $consumo_limpio === 'Comida') {
+                                                        echo '<div class="comida-texto">COMIDA</div>';
+                                                    } else {
+                                                        echo '<div>' . htmlspecialchars($consumo_limpio) . '</div>';
+                                                    }
+                                                }
+                                            } else {
+                                                echo '<span class="empty-cell">Sin consumo</span>';
+                                            }
+                                            ?>
+                                        </div>
+                                    </td>
+                                <?php endforeach; ?>
                             </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($resultados_tabla as $fila): ?>
-                                <tr>
-                                    <td><?php echo !empty($fila['Fecha']) ? date('d/m/Y', strtotime($fila['Fecha'])) : date('d/m/Y', strtotime($fecha_consulta)); ?></td>
-                                    <td><?php echo htmlspecialchars($fila['Id_Empleado'] ?? ''); ?></td>
-                                    <td><?php echo htmlspecialchars($fila['Nombre'] ?? ''); ?></td>
-                                    <td><?php echo htmlspecialchars($fila['Lunes'] ?? ''); ?></td>
-                                    <td><?php echo htmlspecialchars($fila['Martes'] ?? ''); ?></td>
-                                    <td><?php echo htmlspecialchars($fila['Miercoles'] ?? ''); ?></td>
-                                    <td><?php echo htmlspecialchars($fila['Jueves'] ?? ''); ?></td>
-                                    <td><?php echo htmlspecialchars($fila['Viernes'] ?? ''); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php else: ?>
-                <div class="text-center py-4">
-                    <p>Selecciona una fecha para consultar tus consumos.</p>
-                    <p class="text-muted">Por defecto se muestran los consumos de la semana en curso.</p>
-                </div>
-            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
+        <?php endif; ?>
+        
+        <!-- Panel de depuración -->
+        <?php if ($show_debug && !empty($debug_messages)): ?>
+        <div class="glass-card">
+            <h4><i class="fas fa-bug"></i> Información de Depuración</h4>
+            <div class="debug-panel">
+                <?php foreach ($debug_messages as $message): ?>
+                    <div><?php echo htmlspecialchars($message); ?></div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- Scripts -->
-    <script src="https://code.jquery.com/jquery-1.11.3.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        $(document).ready(function () {
-            // Inicializar DataTable si hay datos
-            <?php if (!empty($resultados_tabla)): ?>
-                $('#example').DataTable({
-                    "language": {
-                        "url": "//cdn.datatables.net/plug-ins/1.13.4/i18n/es-MX.json"
-                    },
-                    "pageLength": 10,
-                    "order": [[0, 'desc']]
-                });
-            <?php endif; ?>
-            
-            // Auto-refrescar la página cada hora para actualizar las fechas
-            setTimeout(function() {
-                location.reload();
-            }, 3600000); // 3600000 ms = 1 hora
-        });
+        // Auto-refrescar cada hora
+        setTimeout(function() {
+            location.reload();
+        }, 3600000);
     </script>
 </body>
 </html>
