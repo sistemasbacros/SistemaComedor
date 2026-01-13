@@ -63,6 +63,28 @@ function obtenerUsuarioPorNombre($conn, $nombre) {
     return $usuarioData ? $usuarioData : false;
 }
 
+// Función para obtener precios según la fecha
+// Antes del 2 de enero 2026: Desayuno = $30, Comida = $30
+// A partir del 2 de enero 2026: Desayuno = $35, Comida = $45
+function obtenerPreciosPorFecha($fecha) {
+    $fechaLimite = strtotime('2026-01-02');
+    $fechaConsumo = strtotime($fecha);
+    
+    if ($fechaConsumo < $fechaLimite) {
+        // Antes del 2 de enero 2026
+        return [
+            'desayuno' => 30,
+            'comida' => 30
+        ];
+    } else {
+        // A partir del 2 de enero 2026
+        return [
+            'desayuno' => 35,
+            'comida' => 45
+        ];
+    }
+}
+
 // ==================== VERIFICAR AUTENTICACIÓN ====================
 $conn = getDatabaseConnection();
 $usuarioAutenticado = false;
@@ -181,6 +203,15 @@ if ($usuarioAutenticado && $conn) {
         'Wednesday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
         'Thursday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0],
         'Friday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0]
+    ];
+    
+    // Array para rastrear fechas específicas y montos por día de la semana
+    $fechasPorDia = [
+        'Monday' => ['fechas' => [], 'monto' => 0],
+        'Tuesday' => ['fechas' => [], 'monto' => 0],
+        'Wednesday' => ['fechas' => [], 'monto' => 0],
+        'Thursday' => ['fechas' => [], 'monto' => 0],
+        'Friday' => ['fechas' => [], 'monto' => 0]
     ];
     
     // Query completo proporcionado
@@ -472,6 +503,25 @@ if ($usuarioAutenticado && $conn) {
                                             $detalleConsumosPorDia[$diaSemanaIngles]['total'] += 1;
                                         }
                                     }
+                                    
+                                    
+                                }
+                                
+                                // Calcular monto según tipo de consumo y fecha
+                                $precios = obtenerPreciosPorFecha($fechaNormalizada);
+                                $montoDia = 0;
+                                if ($cantidadConsumos >= 2) {
+                                    // Desayuno + Comida
+                                    $montoDia = $precios['desayuno'] + $precios['comida'];
+                                } else {
+                                    // Solo Comida
+                                    $montoDia = $precios['comida'];
+                                }
+                                
+                                // Agregar fecha específica y monto al día de la semana
+                                if (isset($fechasPorDia[$diaSemanaIngles])) {
+                                    $fechasPorDia[$diaSemanaIngles]['fechas'][] = $fechaNormalizada;
+                                    $fechasPorDia[$diaSemanaIngles]['monto'] += $montoDia;
                                 }
                                 
                                 $consumosDiarios[$fechaNormalizada] = [
@@ -479,7 +529,8 @@ if ($usuarioAutenticado && $conn) {
                                     'dia_semana' => $diaSemanaIngles,
                                     'consumo' => true,
                                     'cantidad' => $cantidadConsumos,
-                                    'monto' => $cantidadConsumos * 30,
+                                    'monto' => $montoDia,
+                                    'precios' => $precios,
                                     'campo_original' => $campo,
                                     'valor_original' => $valor
                                 ];
@@ -525,19 +576,42 @@ if ($usuarioAutenticado && $conn) {
         
         // ==================== CÁLCULO CORREGIDO DEL MONTO TOTAL ====================
         // Usar los datos específicos de la fila del usuario
+        // Precios variables según fecha:
+        // Antes del 2 enero 2026: Desayuno = $30, Comida = $30
+        // Desde el 2 enero 2026: Desayuno = $35, Comida = $45
         if ($miFilaData) {
             $misConsumos = intval($miFilaData['TotalConsumos'] ?? $miFilaData['TotalConsumosCalculado'] ?? 0);
             $misEntradas = intval($miFilaData['TotalEntradas'] ?? 0);
             
-            // Lógica corregida: 
-            // - Si misConsumos > misEntradas: (misConsumos - misEntradas) * 60 + misEntradas * 30
-            // - Si misConsumos <= misEntradas: misConsumos * 30
+            // Calcular monto basado en consumos diarios con precios variables
+            $montoTotal = 0;
             
-            if ($misConsumos > $misEntradas) {
-                $consumosSinEntrada = $misConsumos - $misEntradas;
-                $montoTotal = ($consumosSinEntrada * 60) + ($misEntradas * 30);
-            } else {
-                $montoTotal = $misConsumos * 30;
+            // Contadores por precio para mostrar desglose
+            $consumosPorPrecio = [
+                30 => 0,  // Consumos a $30
+                35 => 0,  // Desayunos a $35
+                45 => 0,  // Comidas a $45
+                60 => 0,  // Desayuno+Comida a $60 (antes del 2 ene)
+                80 => 0   // Desayuno+Comida a $80 (desde el 2 ene)
+            ];
+            
+            foreach ($consumosDiarios as $consumo) {
+                $montoTotal += $consumo['monto'];
+                
+                // Contar por precio
+                $monto = $consumo['monto'];
+                if (isset($consumosPorPrecio[$monto])) {
+                    $consumosPorPrecio[$monto]++;
+                }
+            }
+            
+            // Calcular totales de desayunos y comidas para mostrar
+            $totalDesayunos = 0;
+            $totalComidas = 0;
+            
+            foreach ($detalleConsumosPorDia as $detalle) {
+                $totalDesayunos += $detalle['desayunos'];
+                $totalComidas += $detalle['comidas'];
             }
             
             // Actualizar totales para mostrar correctamente en las tarjetas
@@ -567,6 +641,8 @@ if ($usuarioAutenticado && $conn) {
             foreach ($consumosDiarios as $consumo) {
                 $diaSemana = $consumo['dia_semana'];
                 $cantidad = $consumo['cantidad'] ?? 1;
+                $fecha = $consumo['fecha'];
+                $monto = $consumo['monto'] ?? 0;
                 
                 // SOLO CONTAR DÍAS HÁBILES
                 if (isset($consumosPorDia[$diaSemana])) {
@@ -580,6 +656,12 @@ if ($usuarioAutenticado && $conn) {
                     } else {
                         $detalleConsumosPorDia[$diaSemana]['comidas'] += 1;
                         $detalleConsumosPorDia[$diaSemana]['total'] += 1;
+                    }
+                    
+                    // Agregar fecha y monto
+                    if (isset($fechasPorDia[$diaSemana])) {
+                        $fechasPorDia[$diaSemana]['fechas'][] = $fecha;
+                        $fechasPorDia[$diaSemana]['monto'] += $monto;
                     }
                 }
             }
@@ -601,11 +683,10 @@ if ($usuarioAutenticado && $conn) {
             'monto_calculo' => [
                 'mis_consumos' => $misConsumos ?? 0,
                 'mis_entradas' => $misEntradas ?? 0,
-                'consumos_sin_entrada' => isset($misConsumos, $misEntradas) && $misConsumos > $misEntradas ? ($misConsumos - $misEntradas) : 0,
-                'formula_usada' => isset($misConsumos, $misEntradas) ? 
-                    ($misConsumos > $misEntradas ? 
-                        "($misConsumos - $misEntradas) * 60 + $misEntradas * 30" : 
-                        "$misConsumos * 30") : 
+                'total_desayunos' => $totalDesayunos ?? 0,
+                'total_comidas' => $totalComidas ?? 0,
+                'formula_usada' => isset($totalDesayunos, $totalComidas) ? 
+                    "Precios variables según fecha (Antes 2 ene: $30/$30, Después: $35/$45)" : 
                     "Sin datos"
             ]
         ];
@@ -799,7 +880,7 @@ if (isset($conn)) {
             font-size: 0.65rem;
         }
         .multi-consumo {
-            background: rgba(255, 193, 7, 0.3);
+            background: rgba(255, 193, 7, 0.58);
             border: 1px solid var(--warning);
         }
         .auto-login-notice {
@@ -950,17 +1031,25 @@ if (isset($conn)) {
                         <div>Monto Total</div>
                         <div class="stat-subtitle monto-detalle">
                             <?php 
-                            $misConsumos = $miFilaData ? intval($miFilaData['TotalConsumos'] ?? $miFilaData['TotalConsumosCalculado'] ?? 0) : 0;
-                            $misEntradas = $miFilaData ? intval($miFilaData['TotalEntradas'] ?? 0) : 0;
-                            
-                            if ($misConsumos > $misEntradas): 
-                                $consumosSinEntrada = $misConsumos - $misEntradas;
+                            // Mostrar desglose por precio
+                            if (isset($consumosPorPrecio) && !empty($consumosPorPrecio)):
+                                $mostrarDesglose = false;
+                                foreach ($consumosPorPrecio as $precio => $cantidad):
+                                    if ($cantidad > 0):
+                                        if ($mostrarDesglose) echo '<br>';
+                                        echo $cantidad . ' × $' . $precio;
+                                        $mostrarDesglose = true;
+                                    endif;
+                                endforeach;
+                                
+                                if (!$mostrarDesglose):
+                                    echo '<small>Sin consumos</small>';
+                                endif;
+                            else:
+                                echo '<small>Sin datos disponibles</small>';
+                            endif;
                             ?>
-                                <span class="costo-diferente"><?php echo $consumosSinEntrada; ?> × $60</span><br>
-                                + <?php echo $misEntradas; ?> × $30
-                            <?php else: ?>
-                                <?php echo $misConsumos; ?> × $30
-                            <?php endif; ?>
+                            <br><small style="font-size: 0.7rem; opacity: 0.8; margin-top: 5px; display: block;">Precios variables por fecha</small>
                         </div>
                     </div>
                 </div>
@@ -1052,7 +1141,7 @@ if (isset($conn)) {
                                                 <td class="columna-principal fw-bold text-warning">
                                                     <?php echo $fila['Id_Empleado']; ?>
                                                 </td>
-                                                <td class="columna-principal fw-bold">
+                                                <td class="columna-principal fw-bold text-warning">
                                                     <?php echo htmlspecialchars($user_name); ?>
                                                 </td>
                                                 <td class="columna-principal">
@@ -1083,15 +1172,19 @@ if (isset($conn)) {
                                                     <td class="<?php echo $tieneConsumo ? ($cantidadConsumos > 1 ? 'multi-consumo' : 'consumo-cell') : 'sin-consumo-cell'; ?>"
                                                         title="<?php 
                                                             if ($tieneConsumo) {
-                                                                echo $cantidadConsumos > 1 ? 
-                                                                    'Dos consumos registrados (Desayuno + Comida) - $60' : 
-                                                                    'Un consumo registrado - $30';
+                                                                $preciosFecha = obtenerPreciosPorFecha($fecha);
+                                                                if ($cantidadConsumos > 1) {
+                                                                    $montoTotal = $preciosFecha['desayuno'] + $preciosFecha['comida'];
+                                                                    echo 'Dos consumos (Desayuno + Comida) - $' . $montoTotal . ' ($' . $preciosFecha['desayuno'] . '+$' . $preciosFecha['comida'] . ')';
+                                                                } else {
+                                                                    echo 'Un consumo (Comida) - $' . $preciosFecha['comida'];
+                                                                }
                                                             } else {
                                                                 echo 'Sin consumo este día';
                                                             }
                                                         ?>">
                                                         <?php if ($tieneConsumo): ?>
-                                                            <span class="badge badge-consumo">
+                                                            <span class="badge <?php echo $cantidadConsumos > 1 ? 'multi-consumo' : 'badge-consumo'; ?>">
                                                                 <i class="fas fa-utensils"></i> <?php echo $cantidadConsumos; ?>
                                                             </span>
                                                             <?php if ($cantidadConsumos > 1): ?>
@@ -1117,27 +1210,57 @@ if (isset($conn)) {
                     <div class="row mt-4">
                         <div class="col-md-6">
                             <div class="bg-dark rounded p-3">
-                                <h5><i class="fas fa-info-circle"></i> Leyenda</h5>
-                                <p class="mb-1">
-                                    <span class="badge badge-consumo me-2"><i class="fas fa-utensils"></i> 1</span> = Un consumo (Comida) - $30
+                                <h5><i class="fas fa-info-circle"></i> Leyenda de Consumos</h5>
+                                <p class="mb-2">
+                                    <span class="badge badge-consumo me-2"><i class="fas fa-utensils"></i> 1</span> = Un consumo (Solo Comida)
                                 </p>
-                                <p class="mb-1">
-                                    <span class="badge multi-consumo me-2"><i class="fas fa-utensils"></i> 2</span> = Dos consumos (Desayuno + Comida) - $60
+                                <p class="mb-2">
+                                    <span class="badge multi-consumo me-2"><i class="fas fa-utensils"></i> 2</span> = Dos consumos (Desayuno + Comida)
                                 </p>
-                                <p class="mb-0">
+                                <p class="mb-3">
                                     <span class="badge bg-secondary me-2">-</span> = Sin consumo ese día
                                 </p>
-                                <div class="mt-2">
-                                    <small class="text-muted">
+                                
+                                <div class="mt-3 p-3" style="background: rgba(255, 193, 7, 0.15); border-left: 4px solid var(--warning); border-radius: 5px;">
+                                    <h6 class="text-warning mb-2">
+                                        <i class="fas fa-dollar-sign"></i> <strong>Tabla de Precios por Fecha:</strong>
+                                    </h6>
+                                    <div style="font-size: 0.9em; line-height: 1.8;">
+                                        <div class="mb-2">
+                                            <strong>📅 Antes del 2 enero 2026:</strong><br>
+                                            <span style="margin-left: 20px;">• Solo Comida: <strong>$30</strong></span><br>
+                                            <span style="margin-left: 20px;">• Desayuno: <strong>$30</strong></span><br>
+                                            <span style="margin-left: 20px;">• Desayuno + Comida: <strong>$60</strong> ($30+$30)</span>
+                                        </div>
+                                        <div>
+                                            <strong>📅 Desde el 2 enero 2026:</strong><br>
+                                            <span style="margin-left: 20px;">• Solo Comida: <strong>$45</strong></span><br>
+                                            <span style="margin-left: 20px;">• Desayuno: <strong>$35</strong></span><br>
+                                            <span style="margin-left: 20px;">• Desayuno + Comida: <strong>$80</strong> ($35+$45)</span>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2 pt-2" style="border-top: 1px solid rgba(255, 193, 7, 0.3);">
+                                        <small class="text-warning">
+                                            <i class="fas fa-info-circle"></i> <strong>Ejemplo de cálculo:</strong><br>
+                                            Si tienes consumos del 30 dic al 2 ene:<br>
+                                            • 2 consumos a $30 (antes del 2 ene)<br>    
+                                            • 1 consumo a $35 (desayuno del 2 ene)<br>
+                                            • 1 consumo a $45 (comida del 2 ene)<br>
+                                            <strong>Total: $140</strong>
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="mt-3">
+                                    <small style="color: #ffffff;">
                                         <span class="badge badge-desayuno me-1">D</span> = Desayuno<br>
                                         <span class="badge badge-comida me-1">C</span> = Comida
                                     </small>
                                 </div>
-                            </div>
+                            </div>  
                         </div>
                         <div class="col-md-6">
                             <div class="bg-dark rounded p-3">
-                                <h5><i class="fas fa-chart-pie"></i> Resumen por Día de la Semana <span class="dias-habiles">(Días Hábitos)</span></h5>
+                                <h5><i class="fas fa-chart-pie"></i> Resumen por Día de la Semana <span class="dias-habiles">(Días Hábiles)</span></h5>
                                 <?php
                                 $diasEsp = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
                                 $diasEng = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -1145,13 +1268,26 @@ if (isset($conn)) {
                                 for ($i = 0; $i < 5; $i++):
                                     $count = $consumosPorDia[$diasEng[$i]] ?? 0;
                                     $detalle = $detalleConsumosPorDia[$diasEng[$i]] ?? ['desayunos' => 0, 'comidas' => 0, 'total' => 0];
+                                    $fechasInfo = $fechasPorDia[$diasEng[$i]] ?? ['fechas' => [], 'monto' => 0];
                                     $porcentaje = $totalConsumos > 0 ? round(($count / $totalConsumos) * 100, 1) : 0;
+                                    
+                                    // Formatear fechas para mostrar
+                                    $fechasFormateadas = [];
+                                    foreach ($fechasInfo['fechas'] as $f) {
+                                        $fechasFormateadas[] = date('d M', strtotime($f));
+                                    }
+                                    $fechasTexto = !empty($fechasFormateadas) ? implode(' / ', $fechasFormateadas) : '';
                                 ?>
                                     <div class="resumen-dia <?php echo $detalle['desayunos'] > 0 ? 'multi-consumo' : ''; ?>">
-                                        <div>
+                                        <div style="flex: 1;">
                                             <strong><?php echo $diasEsp[$i]; ?>:</strong>
+                                            <?php if (!empty($fechasTexto)): ?>
+                                                <small class="text-info" style="display: block; font-size: 0.7rem; margin-top: 2px;">
+                                                    <i class="fas fa-calendar-alt"></i> <?php echo $fechasTexto; ?>
+                                                </small>
+                                            <?php endif; ?>
                                             <?php if ($porcentaje > 0): ?>
-                                                <small class="text-muted">(<?php echo $porcentaje; ?>%)</small>
+                                                <small class="text-muted" style="display: block;">(<?php echo $porcentaje; ?>%)</small>
                                             <?php endif; ?>
                                             <div class="detalle-consumo">
                                                 <?php if ($detalle['desayunos'] > 0): ?>
@@ -1160,7 +1296,14 @@ if (isset($conn)) {
                                                 <span class="badge badge-comida"><?php echo $detalle['comidas']; ?> comida(s)</span>
                                             </div>
                                         </div>
-                                        <span class="badge bg-success"><?php echo $count; ?> consumos</span>
+                                        <div style="text-align: right;">
+                                            <span class="badge bg-success"><?php echo $count; ?> consumos</span>
+                                            <?php if ($fechasInfo['monto'] > 0): ?>
+                                                <div style="font-size: 0.85rem; margin-top: 4px; color: var(--gold); font-weight: bold;">
+                                                    $<?php echo number_format($fechasInfo['monto'], 0); ?>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
                                     </div>
                                 <?php endfor; ?>
                                 
