@@ -24,6 +24,39 @@ if (!strtotime($fechaInicio) || !strtotime($fechaFin)) {
 // ————— Verificar si es exportación a Excel —————
 $exportarExcel = isset($_GET['exportar']) && $_GET['exportar'] === 'excel';
 
+// ————— Lista de nombres especiales para resaltar en amarillo —————
+$nombresEspeciales = [
+    'ALEJANDRA CRUZ',
+    'ALTA DIRECCION',
+    'CRUZ JOSE LUIS',
+    'CRUZ RODRIGUEZ ALEJANDRO',
+    'JURIDICO',
+    'PALMA TREJO SANDY MARK',
+    'REYES QUIROZ HILDA',
+    'VIGILANCIA',
+    'CELAYA YAXI LUIS ENRIQUE',
+    'FIRO CORTAZAR FERNANDO',
+    'ADAME GARCIA JOSE PAUL',
+    'HERRERA CUALI HUGO ALEJANDRO',
+    'REYES FONSECA NORMA ANGELICA',
+    'JUREZ VZQUEZ MIGUEL ANGEL',
+    'SOTO DEL HOYO ISMAEL',
+    'GUTIERREZ EZQUIVEL EDGAR',
+    'CASTILLO NIETO JESSICA',
+    'JOSE FERNANDO OSORIO OJEDA'
+];
+
+// Función para verificar si un nombre es especial
+function esNombreEspecial($nombre, $listaEspeciales) {
+    $nombreUpper = strtoupper(trim($nombre));
+    foreach ($listaEspeciales as $especial) {
+        if (strpos($nombreUpper, $especial) !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ————— CONSULTA DE CANCELACIONES (Solo APROBADO) CON TIPO_CONSUMO Y FECHA —————
 $sqlCancelaciones = "
 SELECT 
@@ -96,17 +129,19 @@ if ($stmtCancelaciones) {
         $cancelacionesData[count($cancelacionesData)-1]['FechaStr'] = $fechaStr;
         $cancelacionesData[count($cancelacionesData)-1]['Anio'] = $anioCancelacion;
         $cancelacionesData[count($cancelacionesData)-1]['TipoNormalizado'] = $tipoNormalizado;
+        $cancelacionesData[count($cancelacionesData)-1]['Especial'] = esNombreEspecial($row['Nombre'], $nombresEspeciales);
     }
 }
 
-// ————— CONSULTA DE COMPLEMENTOS —————
+// ————— CONSULTA DE COMPLEMENTOS CON COMIDA PARA LLEVAR —————
 $sqlComplementos = "
 SELECT 
     Nombre_Limpio AS Nombre,
     ISNULL([CAFÉ O TÉ], 0)     AS [CAFÉ O TÉ],
     ISNULL([TORTILLAS], 0)     AS [TORTILLAS],
     ISNULL([AGUA], 0)          AS [AGUA],
-    ISNULL([DESECHABLE], 0)    AS [DESECHABLE]
+    ISNULL([DESECHABLE], 0)    AS [DESECHABLE],
+    ISNULL([COMIDA PARA LLEVAR], 0) AS [COMIDA PARA LLEVAR]
 FROM (
     SELECT 
         CASE 
@@ -149,7 +184,7 @@ FROM (
 ) AS source
 PIVOT (
     COUNT(Complemento)
-    FOR Complemento IN ([CAFÉ O TÉ], [TORTILLAS], [AGUA], [DESECHABLE])
+    FOR Complemento IN ([CAFÉ O TÉ], [TORTILLAS], [AGUA], [DESECHABLE], [COMIDA PARA LLEVAR])
 ) AS pvt
 ORDER BY Nombre_Limpio;
 ";
@@ -163,19 +198,98 @@ $resumenComplementos = [
     'CAFÉ O TÉ' => 0,
     'TORTILLAS' => 0,
     'AGUA' => 0,
-    'DESECHABLE' => 0
+    'DESECHABLE' => 0,
+    'COMIDA PARA LLEVAR' => 0
+];
+
+// Costos por complemento - ACTUALIZADO CON COMIDA PARA LLEVAR
+$costosComplementos = [
+    'CAFÉ O TÉ' => 5,
+    'TORTILLAS' => 4,
+    'AGUA' => 4,
+    'DESECHABLE' => 7,
+    'COMIDA' => 37,
+    'COMIDA PARA LLEVAR' => 52
+];
+
+$montoTotalComplementos = 0;
+$totalesCostosComplementos = [
+    'CAFÉ O TÉ' => 0,
+    'TORTILLAS' => 0,
+    'AGUA' => 0,
+    'DESECHABLE' => 0,
+    'COMIDA PARA LLEVAR' => 0,
+    'COMIDA' => 0
 ];
 
 if ($stmtComplementos) {
     while ($row = sqlsrv_fetch_array($stmtComplementos, SQLSRV_FETCH_ASSOC)) {
+        $row['Especial'] = esNombreEspecial($row['Nombre'], $nombresEspeciales);
+        
+        // Inicializar valores para esta fila
+        $row['TOTAL'] = 0;
+        $row['MONTO_COMIDA'] = 0;
+        $row['MONTO_CAFE_TE'] = 0;
+        $row['MONTO_TORTILLAS'] = 0;
+        $row['MONTO_AGUA'] = 0;
+        $row['MONTO_DESECHABLE'] = 0;
+        $row['MONTO_COMIDA_LLEVAR'] = 0;
+        $row['MONTO_TOTAL'] = 0;
+        
+        // Calcular montos por complemento
+        if (isset($row['CAFÉ O TÉ'])) {
+            $cantidad = intval($row['CAFÉ O TÉ']);
+            $row['MONTO_CAFE_TE'] = $cantidad * $costosComplementos['CAFÉ O TÉ'];
+            $totalesCostosComplementos['CAFÉ O TÉ'] += $row['MONTO_CAFE_TE'];
+        }
+        
+        if (isset($row['TORTILLAS'])) {
+            $cantidad = intval($row['TORTILLAS']);
+            $row['MONTO_TORTILLAS'] = $cantidad * $costosComplementos['TORTILLAS'];
+            $totalesCostosComplementos['TORTILLAS'] += $row['MONTO_TORTILLAS'];
+        }
+        
+        if (isset($row['AGUA'])) {
+            $cantidad = intval($row['AGUA']);
+            $row['MONTO_AGUA'] = $cantidad * $costosComplementos['AGUA'];
+            $totalesCostosComplementos['AGUA'] += $row['MONTO_AGUA'];
+        }
+        
+        if (isset($row['DESECHABLE'])) {
+            $cantidad = intval($row['DESECHABLE']);
+            $row['MONTO_DESECHABLE'] = $cantidad * $costosComplementos['DESECHABLE'];
+            $totalesCostosComplementos['DESECHABLE'] += $row['MONTO_DESECHABLE'];
+        }
+        
+        // Calcular COMIDA PARA LLEVAR
+        if (isset($row['COMIDA PARA LLEVAR'])) {
+            $cantidad = intval($row['COMIDA PARA LLEVAR']);
+            $row['MONTO_COMIDA_LLEVAR'] = $cantidad * $costosComplementos['COMIDA PARA LLEVAR'];
+            $totalesCostosComplementos['COMIDA PARA LLEVAR'] += $row['MONTO_COMIDA_LLEVAR'];
+        }
+        
+        // Calcular total general de cantidad
+        $row['TOTAL'] = intval($row['CAFÉ O TÉ']) + intval($row['TORTILLAS']) + 
+                       intval($row['AGUA']) + intval($row['DESECHABLE']) + 
+                       intval($row['COMIDA PARA LLEVAR']);
+        
+        // Calcular total general de montos
+        $row['MONTO_TOTAL'] = $row['MONTO_CAFE_TE'] + $row['MONTO_TORTILLAS'] + 
+                             $row['MONTO_AGUA'] + $row['MONTO_DESECHABLE'] + 
+                             $row['MONTO_COMIDA_LLEVAR'];
+        
+        // Agregar a datos
         $complementosData[] = $row;
         
+        // Actualizar resumen de cantidades
         foreach ($resumenComplementos as $key => $value) {
             if (isset($row[$key])) {
                 $resumenComplementos[$key] += intval($row[$key]);
                 $totalComplementos += intval($row[$key]);
             }
         }
+        
+        $montoTotalComplementos += $row['MONTO_TOTAL'];
     }
 }
 
@@ -412,6 +526,7 @@ CancelacionesCTE AS (
                 WHEN Tipo_Consumo = ''DESAYUNO'' AND YEAR(CONVERT(DATE, FECHA, 102)) >= 2026 THEN Total * 35
                 WHEN Tipo_Consumo = ''COMIDA'' AND YEAR(CONVERT(DATE, FECHA, 102)) < 2026 THEN Total * 30
                 WHEN Tipo_Consumo = ''COMIDA'' AND YEAR(CONVERT(DATE, FECHA, 102)) >= 2026 THEN Total * 45
+				WHEN Tipo_Consumo = ''AMBOS'' AND YEAR(CONVERT(DATE, FECHA, 102)) >= 2026 THEN Total * 80
                 ELSE 0
             END
         ) AS MontoCancelaciones
@@ -540,13 +655,14 @@ if ($stmt) {
             continue;
         }
         
+        $row['Especial'] = esNombreEspecial($row['Nombre'], $nombresEspeciales);
         $rows[] = $row;
         $totalEmpleados++;
     }
 }
 
 // ==============================================
-// EXPORTACIÓN A EXCEL (.xls) SIMPLE
+// EXPORTACIÓN A EXCEL (.xls) CON COLORES COMPLETOS
 // ==============================================
 if ($exportarExcel && $stmt && count($rows) > 0) {
     header('Content-Type: application/vnd.ms-excel');
@@ -559,13 +675,13 @@ if ($exportarExcel && $stmt && count($rows) > 0) {
         echo '<table border="1" cellspacing="0" cellpadding="3" style="font-family:Calibri;font-size:11px;border-collapse:collapse;">';
         
         echo '<tr>';
-        echo '<th colspan="' . (count($rows[0]) - 2) . '" style="background:#1e3a5c;color:white;font-size:14px;padding:8px;text-align:center;">';
+        echo '<th colspan="' . (count($rows[0]) - 3) . '" style="background:#1e3a5c;color:white;font-size:14px;padding:8px;text-align:center;">';
         echo 'REPORTE DE COMEDOR - REGISTRO DETALLADO DE CONSUMOS';
         echo '</th>';
         echo '</tr>';
         
         echo '<tr>';
-        echo '<th colspan="' . (count($rows[0]) - 2) . '" style="background:#2d4a72;color:white;font-size:11px;padding:6px;text-align:center;">';
+        echo '<th colspan="' . (count($rows[0]) - 3) . '" style="background:#2d4a72;color:white;font-size:11px;padding:6px;text-align:center;">';
         echo 'PERÍODO: ' . $fechaInicio . ' al ' . $fechaFin;
         echo '</th>';
         echo '</tr>';
@@ -574,7 +690,7 @@ if ($exportarExcel && $stmt && count($rows) > 0) {
         echo '<tr style="background:#1e3a5c;color:white;font-weight:bold;">';
         $firstRow = $rows[0];
         foreach ($firstRow as $col => $val) {
-            if (!in_array($col, ['Empleado', 'NombreEntradas'])) {
+            if (!in_array($col, ['Empleado', 'NombreEntradas', 'Especial'])) {
                 echo '<th style="padding:5px;border:1px solid #2d4a72;text-align:center;">' . htmlspecialchars($col) . '</th>';
             }
         }
@@ -582,14 +698,35 @@ if ($exportarExcel && $stmt && count($rows) > 0) {
         
         // Datos
         foreach ($rows as $row) {
-            echo '<tr>';
+            // Determinar el estilo de fondo para toda la fila
+            $filaStyle = '';
+            $celdaStyle = 'padding:4px;border:1px solid #ddd;text-align:center;';
+            $nombreStyle = 'padding:4px;border:1px solid #ddd;text-align:left;';
+            
+            if ($row['Especial']) {
+                $filaStyle = 'background-color:#FFFFE0;'; // Amarillo claro para toda la fila
+                $celdaStyle = 'padding:4px;border:1px solid #FFD700;text-align:center;background-color:#FFFFE0;';
+                $nombreStyle = 'padding:4px;border:1px solid #FFD700;text-align:left;background-color:#FFFF00;font-weight:bold;';
+            }
+            
+            echo '<tr style="' . $filaStyle . '">';
             foreach ($row as $col => $val) {
-                if (in_array($col, ['Empleado', 'NombreEntradas'])) continue;
+                if (in_array($col, ['Empleado', 'NombreEntradas', 'Especial'])) continue;
                 
-                $style = 'padding:4px;border:1px solid #ddd;text-align:center;';
+                $style = $celdaStyle;
+                
+                // Aplicar estilo especial para celda de nombre
+                if ($col === 'Nombre') {
+                    $style = $nombreStyle;
+                }
+                
+                // Estilo específico para celdas de ID cuando es especial
+                if ($col === 'Id_Empleado' && $row['Especial']) {
+                    $style = str_replace('#FFFFE0', '#FFFACD', $style); // Un tono más oscuro para ID
+                }
                 
                 if (strpos($col, 'Monto') === 0) {
-                    $style .= 'text-align:right;';
+                    $style = str_replace('text-align:center;', 'text-align:right;', $style);
                     $val = '$' . number_format($val, 2);
                 }
                 
@@ -601,13 +738,13 @@ if ($exportarExcel && $stmt && count($rows) > 0) {
         echo '</table><br><br>';
     }
     
-    // COMPLEMENTOS
+    // COMPLEMENTOS CON COSTOS Y COMIDA PARA LLEVAR
     if (count($complementosData) > 0) {
         echo '<table border="1" cellspacing="0" cellpadding="3" style="font-family:Calibri;font-size:11px;border-collapse:collapse;">';
         
         echo '<tr>';
-        echo '<th colspan="6" style="background:#229954;color:white;font-size:14px;padding:8px;text-align:center;">';
-        echo 'REPORTE DE COMPLEMENTOS';
+        echo '<th colspan="13" style="background:#229954;color:white;font-size:14px;padding:8px;text-align:center;">';
+        echo 'REPORTE DE COMPLEMENTOS CON COSTOS - INCLUYE COMIDA PARA LLEVAR';
         echo '</th>';
         echo '</tr>';
         
@@ -617,28 +754,93 @@ if ($exportarExcel && $stmt && count($rows) > 0) {
         echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">TORTILLAS</th>';
         echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">AGUA</th>';
         echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">DESECHABLE</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">COMIDA LLEVAR</th>';
         echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">TOTAL</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">COSTO CAFÉ/TÉ</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">COSTO TORTILLAS</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">COSTO AGUA</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">COSTO DESECHABLE</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">COSTO COMIDA LLEVAR</th>';
+        echo '<th style="padding:5px;border:1px solid #1e8449;text-align:center;">TOTAL COSTOS</th>';
         echo '</tr>';
         
         foreach ($complementosData as $complemento) {
-            $total = $complemento['CAFÉ O TÉ'] + $complemento['TORTILLAS'] + $complemento['AGUA'] + $complemento['DESECHABLE'];
-            echo '<tr>';
-            echo '<td style="padding:4px;border:1px solid #ddd;text-align:left;">' . htmlspecialchars($complemento['Nombre']) . '</td>';
-            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;">' . $complemento['CAFÉ O TÉ'] . '</td>';
-            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;">' . $complemento['TORTILLAS'] . '</td>';
-            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;">' . $complemento['AGUA'] . '</td>';
-            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;">' . $complemento['DESECHABLE'] . '</td>';
-            echo '<td style="padding:4px;border:1px solid #ddd;text-align:center;font-weight:bold;background:#d5f4e6;">' . $total . '</td>';
+            $total = $complemento['TOTAL'];
+            $totalCostos = $complemento['MONTO_TOTAL'];
+            
+            // Estilo para fila completa
+            $filaStyle = '';
+            $celdaStyle = 'padding:4px;border:1px solid #ddd;text-align:center;';
+            $nombreStyle = 'padding:4px;border:1px solid #ddd;text-align:left;';
+            
+            if ($complemento['Especial']) {
+                $filaStyle = 'background-color:#FFFFE0;'; // Amarillo claro para toda la fila
+                $celdaStyle = 'padding:4px;border:1px solid #FFD700;text-align:center;background-color:#FFFFE0;';
+                $nombreStyle = 'padding:4px;border:1px solid #FFD700;text-align:left;background-color:#FFFF00;font-weight:bold;';
+            }
+            
+            echo '<tr style="' . $filaStyle . '">';
+            echo '<td style="' . $nombreStyle . '">' . htmlspecialchars($complemento['Nombre']) . '</td>';
+            echo '<td style="' . $celdaStyle . '">' . $complemento['CAFÉ O TÉ'] . '</td>';
+            echo '<td style="' . $celdaStyle . '">' . $complemento['TORTILLAS'] . '</td>';
+            echo '<td style="' . $celdaStyle . '">' . $complemento['AGUA'] . '</td>';
+            echo '<td style="' . $celdaStyle . '">' . $complemento['DESECHABLE'] . '</td>';
+            echo '<td style="' . $celdaStyle . '">' . ($complemento['COMIDA PARA LLEVAR'] ?? 0) . '</td>';
+            
+            // Estilo para celda de total
+            $totalStyle = $celdaStyle;
+            if ($complemento['Especial']) {
+                $totalStyle = str_replace('#FFFFE0', '#FFFACD', $totalStyle);
+            }
+            $totalStyle .= 'font-weight:bold;';
+            
+            echo '<td style="' . $totalStyle . '">' . $total . '</td>';
+            
+            // Celdas de costos
+            $costoStyle = $celdaStyle;
+            $costoStyle .= 'text-align:right;font-family:Courier New;';
+            
+            echo '<td style="' . $costoStyle . '">$' . number_format($complemento['MONTO_CAFE_TE'], 2) . '</td>';
+            echo '<td style="' . $costoStyle . '">$' . number_format($complemento['MONTO_TORTILLAS'], 2) . '</td>';
+            echo '<td style="' . $costoStyle . '">$' . number_format($complemento['MONTO_AGUA'], 2) . '</td>';
+            echo '<td style="' . $costoStyle . '">$' . number_format($complemento['MONTO_DESECHABLE'], 2) . '</td>';
+            echo '<td style="' . $costoStyle . '">$' . number_format($complemento['MONTO_COMIDA_LLEVAR'], 2) . '</td>';
+            
+            // Celda de total costos
+            $totalCostosStyle = $costoStyle;
+            $totalCostosStyle .= 'font-weight:bold;color:#1e8449;';
+            
+            echo '<td style="' . $totalCostosStyle . '">$' . number_format($totalCostos, 2) . '</td>';
             echo '</tr>';
         }
         
+        // RESUMEN DE COSTOS DE COMPLEMENTOS
         echo '<tr style="background:#1e8449;color:white;font-weight:bold;">';
-        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">TOTALES:</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">TOTALES CANTIDAD:</td>';
         echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['CAFÉ O TÉ'] . '</td>';
         echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['TORTILLAS'] . '</td>';
         echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['AGUA'] . '</td>';
         echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['DESECHABLE'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $resumenComplementos['COMIDA PARA LLEVAR'] . '</td>';
         echo '<td style="padding:5px;border:1px solid #186a3b;text-align:center;">' . $totalComplementos . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">$' . number_format($totalesCostosComplementos['CAFÉ O TÉ'], 2) . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">$' . number_format($totalesCostosComplementos['TORTILLAS'], 2) . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">$' . number_format($totalesCostosComplementos['AGUA'], 2) . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">$' . number_format($totalesCostosComplementos['DESECHABLE'], 2) . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">$' . number_format($totalesCostosComplementos['COMIDA PARA LLEVAR'], 2) . '</td>';
+        echo '<td style="padding:5px;border:1px solid #186a3b;text-align:right;">$' . number_format($montoTotalComplementos, 2) . '</td>';
+        echo '</tr>';
+        
+        // RESUMEN DE TARIFAS
+        echo '<tr style="background:#27ae60;color:white;font-weight:bold;">';
+        echo '<td style="padding:5px;border:1px solid #219653;text-align:right;">TARIFAS:</td>';
+        echo '<td style="padding:5px;border:1px solid #219653;text-align:center;">$' . $costosComplementos['CAFÉ O TÉ'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #219653;text-align:center;">$' . $costosComplementos['TORTILLAS'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #219653;text-align:center;">$' . $costosComplementos['AGUA'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #219653;text-align:center;">$' . $costosComplementos['DESECHABLE'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #219653;text-align:center;">$' . $costosComplementos['COMIDA PARA LLEVAR'] . '</td>';
+        echo '<td style="padding:5px;border:1px solid #219653;text-align:center;">COMIDA: $' . $costosComplementos['COMIDA'] . '</td>';
+        echo '<td colspan="6" style="padding:5px;border:1px solid #219653;text-align:center;">COSTO TOTAL COMPLEMENTOS: $' . number_format($montoTotalComplementos, 2) . '</td>';
         echo '</tr>';
         
         echo '</table><br><br>';
@@ -693,13 +895,34 @@ if ($exportarExcel && $stmt && count($rows) > 0) {
                 }
             }
             
-            echo '<tr>';
-            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:left;">' . htmlspecialchars($cancelacion['Nombre']) . '</td>';
-            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;">' . $tipo . '</td>';
-            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;">' . $fecha . '</td>';
-            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;font-weight:bold;color:#e74c3c;">' . $cantidad . '</td>';
-            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;">' . $tarifaTexto . '</td>';
-            echo '<td style="padding:4px;border:1px solid #fadbd8;text-align:center;font-weight:bold;color:#c0392b;">$' . number_format($montoTotal, 2) . '</td>';
+            // Estilo para fila completa
+            $filaStyle = '';
+            $celdaStyle = 'padding:4px;border:1px solid #fadbd8;text-align:center;';
+            $nombreStyle = 'padding:4px;border:1px solid #fadbd8;text-align:left;';
+            
+            if ($cancelacion['Especial']) {
+                $filaStyle = 'background-color:#FFFFE0;'; // Amarillo claro para toda la fila
+                $celdaStyle = 'padding:4px;border:1px solid #FFD700;text-align:center;background-color:#FFFFE0;';
+                $nombreStyle = 'padding:4px;border:1px solid #FFD700;text-align:left;background-color:#FFFF00;font-weight:bold;';
+            }
+            
+            echo '<tr style="' . $filaStyle . '">';
+            echo '<td style="' . $nombreStyle . '">' . htmlspecialchars($cancelacion['Nombre']) . '</td>';
+            echo '<td style="' . $celdaStyle . '">' . $tipo . '</td>';
+            echo '<td style="' . $celdaStyle . '">' . $fecha . '</td>';
+            
+            // Estilo para celda de cantidad
+            $cantidadStyle = $celdaStyle;
+            $cantidadStyle .= 'font-weight:bold;color:#e74c3c;';
+            
+            echo '<td style="' . $cantidadStyle . '">' . $cantidad . '</td>';
+            echo '<td style="' . $celdaStyle . '">' . $tarifaTexto . '</td>';
+            
+            // Estilo para celda de monto
+            $montoStyle = $celdaStyle;
+            $montoStyle .= 'font-weight:bold;color:#c0392b;';
+            
+            echo '<td style="' . $montoStyle . '">$' . number_format($montoTotal, 2) . '</td>';
             echo '</tr>';
         }
         
@@ -753,7 +976,7 @@ if (!$exportarExcel):
         }
         
         .container {
-            max-width: 1600px;
+            max-width: 1800px;
             margin: 0 auto;
             background: white;
             border-radius: 8px;
@@ -955,11 +1178,39 @@ if (!$exportarExcel):
             background-color: #edf2f7 !important;
         }
         
+        /* Filas especiales (nombres en amarillo) - COMPLETAS */
+        .row-especial-completa {
+            background-color: #FFFACD !important;
+        }
+        
+        .row-especial-completa:hover {
+            background-color: #FFF8DC !important;
+        }
+        
+        .nombre-especial {
+            background-color: #FFFF00 !important;
+            font-weight: bold !important;
+            color: #000 !important;
+            border-left: 3px solid #FFD700 !important;
+        }
+        
+        .celda-especial {
+            background-color: #FFFACD !important;
+            border-color: #FFEAA7 !important;
+        }
+        
         /* Columnas de montos alineadas a la derecha */
         .monto-column {
             text-align: right !important;
             font-family: 'Courier New', monospace;
             font-weight: 500;
+        }
+        
+        .costo-column {
+            text-align: right !important;
+            font-family: 'Courier New', monospace;
+            color: #1e8449;
+            font-weight: 600;
         }
         
         /* Columnas fijas para tabla principal */
@@ -980,6 +1231,18 @@ if (!$exportarExcel):
             left: 0;
             z-index: 15;
             border-right: 2px solid #2d4a72;
+        }
+        
+        /* Columnas especiales fijas */
+        .fixed-column-especial {
+            background: #FFD700 !important;
+            color: #000 !important;
+            font-weight: bold;
+            position: sticky;
+            left: 0;
+            z-index: 5;
+            border-right: 2px solid #FFA500;
+            border-left: 3px solid #FFA500 !important;
         }
         
         /* Totales */
@@ -1022,6 +1285,41 @@ if (!$exportarExcel):
         
         .footer strong {
             color: white;
+        }
+        
+        /* LEYENDA PARA NOMBRES ESPECIALES */
+        .leyenda-container {
+            padding: 15px 30px;
+            background: #f0f4f8;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .leyenda {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 15px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            font-size: 12px;
+            color: #4a5568;
+        }
+        
+        .leyenda-color {
+            width: 20px;
+            height: 20px;
+            background-color: #FFFF00;
+            border: 1px solid #FFD700;
+            border-radius: 3px;
+        }
+        
+        .leyenda-color-completa {
+            width: 20px;
+            height: 20px;
+            background-color: #FFFACD;
+            border: 1px solid #FFD700;
+            border-radius: 3px;
         }
         
         /* RESPONSIVE */
@@ -1119,6 +1417,10 @@ if (!$exportarExcel):
             width: 120px;
         }
         
+        .column-costo {
+            width: 100px;
+        }
+        
         .column-total {
             width: 100px;
             font-weight: 600;
@@ -1131,6 +1433,62 @@ if (!$exportarExcel):
         .column-cantidad {
             width: 80px;
         }
+        
+        /* TARIFAS */
+        .tarifas-container {
+            background: #f0fff4;
+            border: 1px solid #c6f6d5;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .tarifas-title {
+            font-weight: 600;
+            color: #1e8449;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .tarifas-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 10px;
+        }
+        
+        .tarifa-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #c6f6d5;
+        }
+        
+        .tarifa-nombre {
+            font-weight: 500;
+            color: #2d3748;
+        }
+        
+        .tarifa-valor {
+            font-weight: 700;
+            color: #1e8449;
+            font-family: 'Courier New', monospace;
+        }
+        
+        /* RESALTADO COMIDA LLEVAR */
+        .comida-llevar {
+            background-color: #E8F5E9 !important;
+            border-color: #C8E6C9 !important;
+            font-weight: bold;
+        }
+        
+        .costo-comida-llevar {
+            color: #1B5E20 !important;
+            font-weight: 700;
+        }
     </style>
 </head>
 <body>
@@ -1139,12 +1497,33 @@ if (!$exportarExcel):
         <div class="header">
             <div class="header-title">
                 <i class="fas fa-utensils"></i>
-                REPORTE DE COMEDOR - SISTEMA DE CONSUMOS
+                REPORTE DE COMEDOR - SISTEMA DE CONSUMOS CON COSTOS
             </div>
             <div class="period-info">
                 <i class="fas fa-calendar-alt"></i>
                 <strong>PERÍODO:</strong> 
                 <?php echo date('d/m/Y', strtotime($fechaInicio)); ?> - <?php echo date('d/m/Y', strtotime($fechaFin)); ?>
+            </div>
+        </div>
+
+        <!-- LEYENDA PARA NOMBRES ESPECIALES -->
+        <div class="leyenda-container">
+            <div class="leyenda">
+                <div class="leyenda-color"></div>
+                <span><strong>Nombre especial (amarillo intenso)</strong></span>
+            </div>
+            <div class="leyenda ms-3">
+                <div class="leyenda-color-completa"></div>
+                <span><strong>Registro completo especial (amarillo claro)</strong></span>
+            </div>
+            <div class="leyenda ms-3">
+                <i class="fas fa-info-circle text-primary"></i>
+                <span><strong>Nombres especiales:</strong> 
+                ALEJANDRA CRUZ, ALTA DIRECCION, CRUZ JOSE LUIS, CRUZ RODRIGUEZ ALEJANDRO, JURIDICO, 
+                PALMA TREJO SANDY MARK, REYES QUIROZ HILDA, VIGILANCIA, CELAYA YAXI LUIS ENRIQUE, 
+                FIRO CORTAZAR FERNANDO, ADAME GARCIA JOSE PAUL, HERRERA CUALI HUGO ALEJANDRO, 
+                REYES FONSECA NORMA ANGELICA, JUREZ VZQUEZ MIGUEL ANGEL, SOTO DEL HOYO ISMAEL, 
+                GUTIERREZ EZQUIVEL EDGAR, CASTILLO NIETO JESSICA, JOSE FERNANDO OSORIO OJEDA</span>
             </div>
         </div>
 
@@ -1203,7 +1582,7 @@ if (!$exportarExcel):
                                     $firstRow = $rows[0];
                                     $colIndex = 0;
                                     foreach ($firstRow as $col => $val) {
-                                        if (!in_array($col, ['Empleado', 'NombreEntradas'])) {
+                                        if (!in_array($col, ['Empleado', 'NombreEntradas', 'Especial'])) {
                                             $widthClass = '';
                                             $alignClass = 'text-center';
                                             $fixedClass = '';
@@ -1253,33 +1632,53 @@ if (!$exportarExcel):
                         </thead>
                         <tbody>
                             <?php foreach ($rows as $row): ?>
-                                <tr>
+                                <tr class="<?php echo $row['Especial'] ? 'row-especial-completa' : ''; ?>">
                                     <?php foreach ($row as $col => $val): ?>
-                                        <?php if (in_array($col, ['Empleado', 'NombreEntradas'])) continue; ?>
+                                        <?php if (in_array($col, ['Empleado', 'NombreEntradas', 'Especial'])) continue; ?>
                                         
                                         <?php
                                         $widthClass = '';
                                         $alignClass = 'text-center';
                                         $fixedClass = '';
+                                        $especialClass = '';
+                                        $celdaEspecialClass = '';
                                         $displayVal = $val;
                                         
                                         // Determinar clases específicas por columna
                                         if ($col === 'Id_Empleado') {
                                             $widthClass = 'column-id';
                                             $fixedClass = 'fixed-column';
+                                            if ($row['Especial']) {
+                                                $especialClass = 'nombre-especial';
+                                                $celdaEspecialClass = 'celda-especial';
+                                            }
                                         } elseif ($col === 'Nombre') {
                                             $widthClass = 'column-nombre';
                                             $alignClass = 'text-left';
                                             $fixedClass = 'fixed-column';
+                                            if ($row['Especial']) {
+                                                $especialClass = 'nombre-especial';
+                                                $celdaEspecialClass = 'celda-especial';
+                                            }
                                         } elseif (strpos($col, 'Monto') === 0) {
                                             $widthClass = 'column-monto';
                                             $alignClass = 'text-right monto-column';
                                             $displayVal = '$' . number_format($val, 2);
+                                            if ($row['Especial']) {
+                                                $celdaEspecialClass = 'celda-especial';
+                                            }
                                         } elseif (strpos($col, 'Total') === 0) {
                                             $widthClass = 'column-total';
+                                            if ($row['Especial']) {
+                                                $celdaEspecialClass = 'celda-especial';
+                                            }
+                                        } else {
+                                            if ($row['Especial']) {
+                                                $celdaEspecialClass = 'celda-especial';
+                                            }
                                         }
                                         ?>
-                                        <td class="<?php echo $fixedClass . ' ' . $widthClass . ' ' . $alignClass; ?>">
+                                        <td class="<?php echo $fixedClass . ' ' . $especialClass . ' ' . $celdaEspecialClass . ' ' . $widthClass . ' ' . $alignClass; ?>">
                                             <?php echo htmlspecialchars($displayVal); ?>
                                         </td>
                                     <?php endforeach; ?>
@@ -1290,13 +1689,43 @@ if (!$exportarExcel):
                 </div>
             </div>
 
-            <!-- COMPLEMENTOS -->
+            <!-- COMPLEMENTOS CON COSTOS Y COMIDA PARA LLEVAR -->
             <?php if (count($complementosData) > 0): ?>
             <div class="content-container">
                 <div class="section-header">
                     <div class="section-title">
                         <i class="fas fa-coffee"></i>
-                        REPORTE DE COMPLEMENTOS
+                        REPORTE DE COMPLEMENTOS CON COSTOS - INCLUYE COMIDA PARA LLEVAR
+                    </div>
+                </div>
+                
+                <!-- TARIFAS DE COMPLEMENTOS -->
+                <div class="tarifas-container">
+                    <div class="tarifas-title">
+                        <i class="fas fa-tag"></i> TARIFAS DE COMPLEMENTOS
+                    </div>
+                    <div class="tarifas-grid">
+                        <div class="tarifa-item">
+                            <span class="tarifa-nombre">CAFÉ O TÉ:</span>
+                            <span class="tarifa-valor">$<?php echo $costosComplementos['CAFÉ O TÉ']; ?></span>
+                        </div>
+                        <div class="tarifa-item">
+                            <span class="tarifa-nombre">TORTILLAS:</span>
+                            <span class="tarifa-valor">$<?php echo $costosComplementos['TORTILLAS']; ?></span>
+                        </div>
+                        <div class="tarifa-item">
+                            <span class="tarifa-nombre">AGUA:</span>
+                            <span class="tarifa-valor">$<?php echo $costosComplementos['AGUA']; ?></span>
+                        </div>
+                        <div class="tarifa-item">
+                            <span class="tarifa-nombre">DESECHABLE:</span>
+                            <span class="tarifa-valor">$<?php echo $costosComplementos['DESECHABLE']; ?></span>
+                        </div>
+                        <div class="tarifa-item">
+                            <span class="tarifa-nombre">COMIDA PARA LLEVAR:</span>
+                            <span class="tarifa-valor">$<?php echo $costosComplementos['COMIDA PARA LLEVAR']; ?></span>
+                        </div>
+                     
                     </div>
                 </div>
                 
@@ -1309,31 +1738,79 @@ if (!$exportarExcel):
                                 <th class="column-cantidad">TORTILLAS</th>
                                 <th class="column-cantidad">AGUA</th>
                                 <th class="column-cantidad">DESECHABLE</th>
+                                <th class="column-cantidad comida-llevar">COMIDA LLEVAR</th>
                                 <th class="column-total">TOTAL</th>
+                                <th class="column-costo">COSTO CAFÉ/TÉ</th>
+                                <th class="column-costo">COSTO TORTILLAS</th>
+                                <th class="column-costo">COSTO AGUA</th>
+                                <th class="column-costo">COSTO DESECHABLE</th>
+                                <th class="column-costo costo-comida-llevar">COSTO COMIDA LLEVAR</th>
+                                <th class="column-monto">TOTAL COSTOS</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($complementosData as $complemento): 
-                                $total = $complemento['CAFÉ O TÉ'] + $complemento['TORTILLAS'] + $complemento['AGUA'] + $complemento['DESECHABLE'];
+                                $total = $complemento['TOTAL'];
+                                $totalCostos = $complemento['MONTO_TOTAL'];
                             ?>
-                                <tr>
-                                    <td class="text-left column-nombre"><?php echo htmlspecialchars($complemento['Nombre']); ?></td>
-                                    <td class="column-cantidad"><?php echo $complemento['CAFÉ O TÉ']; ?></td>
-                                    <td class="column-cantidad"><?php echo $complemento['TORTILLAS']; ?></td>
-                                    <td class="column-cantidad"><?php echo $complemento['AGUA']; ?></td>
-                                    <td class="column-cantidad"><?php echo $complemento['DESECHABLE']; ?></td>
-                                    <td class="column-total" style="font-weight:bold;"><?php echo $total; ?></td>
+                                <tr class="<?php echo $complemento['Especial'] ? 'row-especial-completa' : ''; ?>">
+                                    <td class="text-left column-nombre <?php echo $complemento['Especial'] ? 'nombre-especial' : ''; ?>">
+                                        <?php echo htmlspecialchars($complemento['Nombre']); ?>
+                                    </td>
+                                    <td class="column-cantidad <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        <?php echo $complemento['CAFÉ O TÉ']; ?>
+                                    </td>
+                                    <td class="column-cantidad <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        <?php echo $complemento['TORTILLAS']; ?>
+                                    </td>
+                                    <td class="column-cantidad <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        <?php echo $complemento['AGUA']; ?>
+                                    </td>
+                                    <td class="column-cantidad <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        <?php echo $complemento['DESECHABLE']; ?>
+                                    </td>
+                                    <td class="column-cantidad comida-llevar <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        <?php echo $complemento['COMIDA PARA LLEVAR'] ?? 0; ?>
+                                    </td>
+                                    <td class="column-total <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>" style="font-weight:bold;">
+                                        <?php echo $total; ?>
+                                    </td>
+                                    <td class="costo-column <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        $<?php echo number_format($complemento['MONTO_CAFE_TE'], 2); ?>
+                                    </td>
+                                    <td class="costo-column <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        $<?php echo number_format($complemento['MONTO_TORTILLAS'], 2); ?>
+                                    </td>
+                                    <td class="costo-column <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        $<?php echo number_format($complemento['MONTO_AGUA'], 2); ?>
+                                    </td>
+                                    <td class="costo-column <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        $<?php echo number_format($complemento['MONTO_DESECHABLE'], 2); ?>
+                                    </td>
+                                    <td class="costo-column costo-comida-llevar <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>">
+                                        $<?php echo number_format($complemento['MONTO_COMIDA_LLEVAR'], 2); ?>
+                                    </td>
+                                    <td class="monto-column <?php echo $complemento['Especial'] ? 'celda-especial' : ''; ?>" style="font-weight:bold;">
+                                        $<?php echo number_format($totalCostos, 2); ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
                         <tfoot>
                             <tr>
-                                <td class="text-right" style="font-weight:bold;">TOTALES:</td>
+                                <td class="text-right" style="font-weight:bold;">TOTALES CANTIDAD:</td>
                                 <td><?php echo number_format($resumenComplementos['CAFÉ O TÉ']); ?></td>
                                 <td><?php echo number_format($resumenComplementos['TORTILLAS']); ?></td>
                                 <td><?php echo number_format($resumenComplementos['AGUA']); ?></td>
                                 <td><?php echo number_format($resumenComplementos['DESECHABLE']); ?></td>
+                                <td class="comida-llevar"><?php echo number_format($resumenComplementos['COMIDA PARA LLEVAR']); ?></td>
                                 <td><?php echo number_format($totalComplementos); ?></td>
+                                <td class="text-right">$<?php echo number_format($totalesCostosComplementos['CAFÉ O TÉ'], 2); ?></td>
+                                <td class="text-right">$<?php echo number_format($totalesCostosComplementos['TORTILLAS'], 2); ?></td>
+                                <td class="text-right">$<?php echo number_format($totalesCostosComplementos['AGUA'], 2); ?></td>
+                                <td class="text-right">$<?php echo number_format($totalesCostosComplementos['DESECHABLE'], 2); ?></td>
+                                <td class="text-right costo-comida-llevar">$<?php echo number_format($totalesCostosComplementos['COMIDA PARA LLEVAR'], 2); ?></td>
+                                <td class="text-right">$<?php echo number_format($montoTotalComplementos, 2); ?></td>
                             </tr>
                         </tfoot>
                     </table>
@@ -1394,13 +1871,25 @@ if (!$exportarExcel):
                                     }
                                 }
                             ?>
-                                <tr>
-                                    <td class="text-left column-nombre"><?php echo htmlspecialchars($cancelacion['Nombre']); ?></td>
-                                    <td class="column-cantidad"><?php echo $tipo; ?></td>
-                                    <td class="column-fecha"><?php echo $fecha; ?></td>
-                                    <td class="column-cantidad" style="font-weight:bold;"><?php echo $cantidad; ?></td>
-                                    <td><?php echo $tarifaTexto; ?></td>
-                                    <td class="column-monto monto-column" style="font-weight:bold;">$<?php echo number_format($montoTotal, 2); ?></td>
+                                <tr class="<?php echo $cancelacion['Especial'] ? 'row-especial-completa' : ''; ?>">
+                                    <td class="text-left column-nombre <?php echo $cancelacion['Especial'] ? 'nombre-especial' : ''; ?>">
+                                        <?php echo htmlspecialchars($cancelacion['Nombre']); ?>
+                                    </td>
+                                    <td class="column-cantidad <?php echo $cancelacion['Especial'] ? 'celda-especial' : ''; ?>">
+                                        <?php echo $tipo; ?>
+                                    </td>
+                                    <td class="column-fecha <?php echo $cancelacion['Especial'] ? 'celda-especial' : ''; ?>">
+                                        <?php echo $fecha; ?>
+                                    </td>
+                                    <td class="column-cantidad <?php echo $cancelacion['Especial'] ? 'celda-especial' : ''; ?>" style="font-weight:bold;">
+                                        <?php echo $cantidad; ?>
+                                    </td>
+                                    <td class="<?php echo $cancelacion['Especial'] ? 'celda-especial' : ''; ?>">
+                                        <?php echo $tarifaTexto; ?>
+                                    </td>
+                                    <td class="column-monto monto-column <?php echo $cancelacion['Especial'] ? 'celda-especial' : ''; ?>" style="font-weight:bold;">
+                                        $<?php echo number_format($montoTotal, 2); ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -1440,9 +1929,11 @@ if (!$exportarExcel):
         <div class="footer">
             <p class="mb-2">
                 <strong>SISTEMA DE REPORTES - COMEDOR CORPORATIVO</strong>
+                <span class="ms-3">INCLUYE COMIDA PARA LLEVAR A $<?php echo $costosComplementos['COMIDA PARA LLEVAR']; ?> PESOS</span>
             </p>
             <p class="mb-0">
                 <i class="fas fa-clock"></i> Generado: <?php echo date('d/m/Y H:i:s'); ?>
+                <span class="ms-3"><i class="fas fa-star text-warning"></i> Nombres especiales: amarillo intenso (nombre) + amarillo claro (registro completo)</span>
             </p>
         </div>
     </div>
@@ -1488,14 +1979,15 @@ if (!$exportarExcel):
                 }
             });
 
-            // Inicializar DataTables para tablas secundarias
+            // Inicializar DataTables para tabla de complementos
             if ($('#tablaComplementos').length) {
                 $('#tablaComplementos').DataTable({
                     language: {
                         url: "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json"
                     },
                     pageLength: 15,
-                    order: [[5, 'desc']],
+                    order: [[12, 'desc']], // Ordenar por TOTAL COSTOS
+                    scrollX: true,
                     dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>' +
                          '<"row"<"col-sm-12"tr>>' +
                          '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>',
@@ -1503,6 +1995,14 @@ if (!$exportarExcel):
                         {
                             targets: [0], // Columna Nombre
                             className: 'dt-left'
+                        },
+                        {
+                            targets: [7, 8, 9, 10, 11, 12], // Columnas de costos
+                            className: 'dt-right'
+                        },
+                        {
+                            targets: [5], // Columna COMIDA LLEVAR
+                            className: 'dt-center'
                         }
                     ]
                 });

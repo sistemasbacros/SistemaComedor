@@ -75,7 +75,8 @@ $dia_semana = date('N');
 $hora_actual = date('H:i');
 
 // Bloquear desde jueves 13:00 hasta domingo 23:59
-if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
+if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
+    $dia_semana == 4 || // Viernes completo
     $dia_semana == 5 || // Viernes completo
     $dia_semana == 6 || // Sábado completo
     ($dia_semana == 7 && $hora_actual <= '23:59')) { // Domingo hasta 23:59

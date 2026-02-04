@@ -1,0 +1,409 @@
+================================================================================
+  ESTRUCTURA DEL PROYECTO - SISTEMA COMEDOR BACROCORP
+  Reorganización y Unificación de APIs
+================================================================================
+
+FECHA: 2026-01-27
+VERSIÓN: 2.0 (Unificada)
+
+================================================================================
+  ESTRUCTURA DE CARPETAS
+================================================================================
+
+Comedor/
+├── api/                           ← Cliente API unificado (USAR ESTE)
+│   ├── Api.php                    ← Archivo principal con todas las clases
+│   └── README.txt                 ← Documentación completa de uso
+│
+├── deprecated/                    ← Archivos obsoletos (NO USAR)
+│   ├── ApiClient.php              ← Cliente antiguo (reemplazado)
+│   ├── api_client.php             ← Cliente antiguo duplicado (reemplazado)
+│   ├── config_api.php             ← Configuración antigua (reemplazada)
+│   ├── token_manager.php          ← Gestor de tokens antiguo (reemplazado)
+│   └── endpoint_helpers.php       ← Helpers antiguos (reemplazados)
+│
+├── tests/                         ← Scripts de prueba
+│   ├── test_api_unificada.php     ← Test completo del cliente nuevo
+│   └── test_api.php               ← Test antiguo (deprecado)
+│
+├── examples/                      ← Ejemplos y referencias
+│   ├── backend_api_example.js     ← Ejemplo del backend en Node.js
+│   └── PedidosComedor_Backend.php ← Ejemplo antiguo de backend PHP
+│
+├── Admiin.php                     ← Login (ACTUALIZADO para usar api/Api.php)
+├── AgendaPedidos1.php             ← Consulta de consumos (ACTUALIZADO)
+├── FormatCancel.php               ← Formulario de cancelaciones (ACTUALIZADO)
+├── MenUsuario.php                 ← Menú principal
+├── Menpedidos.php                 ← Gestión de pedidos
+├── admicome4.php                  ← Panel administrativo
+└── [otros archivos PHP del sistema]
+
+================================================================================
+  CAMBIOS PRINCIPALES
+================================================================================
+
+ANTES (DESORDENADO):
+--------------------
+- 5 archivos diferentes para manejar APIs:
+  • ApiClient.php
+  • api_client.php (duplicado)
+  • config_api.php
+  • token_manager.php
+  • endpoint_helpers.php
+
+- Código duplicado y confuso
+- Llamadas cURL dispersas en múltiples archivos
+- Difícil de mantener
+
+DESPUÉS (UNIFICADO):
+--------------------
+- 1 solo archivo: api/Api.php
+- Estructura clara y organizada
+- Archivos obsoletos movidos a /deprecated/
+- Tests en /tests/
+- Ejemplos en /examples/
+- Documentación completa en api/README.txt
+
+================================================================================
+  CÓMO USAR EL NUEVO SISTEMA
+================================================================================
+
+1. INCLUIR EL CLIENTE
+---------------------
+require_once __DIR__ . '/api/Api.php';
+
+2. EJEMPLO DE USO EN CUALQUIER ARCHIVO
+---------------------------------------
+<?php
+require_once __DIR__ . '/api/Api.php';
+
+// Verificar autenticación
+if (!Api::isAuthenticated()) {
+    header("Location: Admiin.php");
+    exit;
+}
+
+// Obtener usuario actual
+$user = Api::getCurrentUser();
+echo "Bienvenido " . $user['nombre'];
+
+// Obtener pedidos
+$pedidos = Api::pedidos()->misPedidos();
+if ($pedidos['success']) {
+    foreach ($pedidos['data'] as $pedido) {
+        echo $pedido['fecha'] . " - " . $pedido['tipo'];
+    }
+}
+
+// Crear cancelación
+$resultado = Api::cancelaciones()->crear([
+    'jefe' => 'Juan Pérez',
+    'tipo_consumo' => 'DESAYUNO',
+    'fecha' => '2026-01-28',
+    'causa' => 'SALUD'
+]);
+
+if ($resultado['success']) {
+    echo "Cancelación registrada";
+} else {
+    echo "Error: " . $resultado['error'];
+}
+?>
+
+================================================================================
+  ARCHIVOS ACTUALIZADOS
+================================================================================
+
+✅ Admiin.php
+   - Cambiado: require_once __DIR__ . '/api/Api.php'
+   - Usa: Api::auth()->login($usuario, $password)
+
+✅ AgendaPedidos1.php
+   - Cambiado: require_once __DIR__ . '/api/Api.php'
+   - Usa: Api::isAuthenticated()
+   - Usa: Api::getCurrentUser()
+   - Usa: Api::consumos()->misConsumos($fecha)
+
+✅ FormatCancel.php
+   - Cambiado: require_once __DIR__ . '/api/Api.php'
+   - Usa: Api::isAuthenticated()
+   - Usa: Api::getCurrentUser()
+   - Usa: Api::cancelaciones()->validaciones()
+   - Usa: Api::cancelaciones()->crear($datos)
+
+================================================================================
+  MÓDULOS DISPONIBLES EN api/Api.php
+================================================================================
+
+1. Api::auth()
+   - login($usuario, $password)
+   - logout()
+   - validarToken()
+   - refrescarToken()
+
+2. Api::pedidos()
+   - perfil()
+   - verificar($fecha)
+   - crear($fechaSemana, $desayunos, $comidas)
+   - misPedidos()
+   - semanasDisponibles()
+
+3. Api::consumos()
+   - misConsumos($fecha)
+   - estadisticas()
+
+4. Api::cancelaciones()
+   - validaciones()
+   - crear($datos)
+   - misCancelaciones()
+
+5. Api::empleados()
+   - perfil()
+   - listar()
+   - crear($datos)
+   - actualizar($id, $datos)
+   - eliminar($id)
+
+6. Api::menu()
+   - listar()
+   - semana($fecha)
+   - crear($datos)
+   - actualizar($id, $datos)
+   - eliminar($id)
+
+7. Api::reportes()
+   - dashboard()
+   - detallado($params)
+   - cancelaciones()
+   - consumo()
+
+8. UTILIDADES
+   - Api::isAuthenticated()
+   - Api::requireAuth()
+   - Api::getCurrentUser()
+   - Api::getToken()
+   - Api::info()
+
+================================================================================
+  CONFIGURACIÓN DE ENTORNO
+================================================================================
+
+El sistema detecta automáticamente el entorno:
+
+LOCAL (127.0.0.1, localhost):
+   URL API: http://127.0.0.1:3000
+
+DESARROLLO (dev, desarollo en hostname):
+   URL API: http://desarollo-bacros:3000
+
+PRODUCCIÓN (Docker, IPs corporativas):
+   URL API: http://host.docker.internal:3000
+
+Para forzar un entorno específico, editar api/Api.php línea ~99:
+   $this->entorno = 'local';  // local, desarrollo, produccion
+
+================================================================================
+  ENDPOINTS DEL BACKEND (Rust)
+================================================================================
+
+El backend corre en: http://127.0.0.1:3000
+
+ENDPOINTS DISPONIBLES:
+   ✓ GET  /health                              - Estado del servidor
+   ✓ POST /auth/login                          - Login
+   ✓ GET  /auth/profile                        - Perfil del usuario
+   ✓ GET  /auth/verify                         - Verificar token
+   ✓ GET  /api/pedidos/perfil                  - Perfil para pedidos
+   ✓ GET  /api/pedidos/verificar               - Verificar límite
+   ✓ POST /api/pedidos                         - Crear pedido
+   ✓ GET  /api/pedidos/mis-pedidos             - Mis pedidos
+   ✓ GET  /api/pedidos/semanas-disponibles     - Semanas disponibles
+   ✓ GET  /api/cancelaciones/validaciones      - Validaciones
+   ✓ POST /api/cancelaciones                   - Crear cancelación
+   ✓ GET  /api/cancelaciones/mis-cancelaciones - Mis cancelaciones
+   ✓ GET  /api/cancelaciones/pendientes        - Pendientes
+   ✓ GET  /api/empleados                       - Información empleado
+   ✓ GET  /api/empleados/perfil                - Perfil empleado
+   ✓ GET  /api/reporte/reporte-detallado       - Reporte detallado
+
+================================================================================
+  PROBAR EL SISTEMA
+================================================================================
+
+1. VERIFICAR QUE EL BACKEND ESTÉ CORRIENDO
+-------------------------------------------
+En la terminal del backend debe aparecer:
+   INFO rust_backend_sqlserver: 🔥 Servidor ejecutándose en http://0.0.0.0:3000
+
+Verificar con curl:
+   curl http://127.0.0.1:3000/health
+
+Debe responder:
+   {"status":"ok","message":"Backend is running"}
+
+2. EJECUTAR EL TEST AUTOMATIZADO
+---------------------------------
+cd "c:\Users\Boris.Ramirez\Downloads\Proyectos barcos produccion\Comedor"
+php tests/test_api_unificada.php
+
+Resultado esperado:
+   ✅ LOGIN EXITOSO
+   ✅ Token recibido
+   ✅ Endpoints respondiendo
+
+3. PROBAR EN EL NAVEGADOR
+--------------------------
+Abrir: http://localhost/Comedor/Admiin.php
+   - Hacer login con credenciales válidas
+   - Verificar que redirija a MenUsuario.php
+   - Probar funcionalidades de pedidos y cancelaciones
+
+================================================================================
+  SOLUCIÓN DE PROBLEMAS
+================================================================================
+
+PROBLEMA: "Error de conexión: Failed to connect to 127.0.0.1 port 3000"
+SOLUCIÓN:
+   1. Verificar que el backend esté corriendo:
+      cd BackendRustBACROS
+      cargo run
+
+   2. Verificar que responda:
+      curl http://127.0.0.1:3000/health
+
+   3. Revisar firewall de Windows
+   4. Verificar que el puerto 3000 no esté ocupado:
+      netstat -ano | findstr :3000
+
+PROBLEMA: "Error HTTP 404"
+SOLUCIÓN:
+   - Verificar que la URL base sea correcta en api/Api.php
+   - Verificar que los endpoints existan en el backend
+   - Revisar los logs del backend
+
+PROBLEMA: "Token inválido o expirado"
+SOLUCIÓN:
+   - Hacer logout y volver a hacer login
+   - Verificar que $_SESSION esté funcionando
+   - session_start() debe estar al inicio de cada archivo
+
+PROBLEMA: "Usuario no autenticado"
+SOLUCIÓN:
+   - Verificar que haya hecho login en Admiin.php
+   - Verificar que la sesión persista entre páginas
+   - Revisar cookies de sesión en el navegador
+
+================================================================================
+  MANTENIMIENTO FUTURO
+================================================================================
+
+AGREGAR UN NUEVO ENDPOINT:
+---------------------------
+Editar api/Api.php y agregar el método en la clase correspondiente:
+
+class PedidosApi {
+    public function nuevoMetodo($params) {
+        return $this->http->get('api/pedidos/nuevo-endpoint', $params);
+    }
+}
+
+Usar en cualquier archivo:
+$resultado = Api::pedidos()->nuevoMetodo(['param' => 'valor']);
+
+CREAR UN NUEVO MÓDULO:
+-----------------------
+Editar api/Api.php y agregar una nueva clase:
+
+class NuevoModuloApi {
+    private $http;
+
+    public function __construct() {
+        $this->http = new HttpClient();
+    }
+
+    public function metodo1() {
+        return $this->http->get('api/nuevo-modulo/metodo1');
+    }
+}
+
+Agregar en la clase Api:
+private static $nuevoModulo;
+public static function nuevoModulo() {
+    return self::$nuevoModulo ??= new NuevoModuloApi();
+}
+
+Usar:
+$resultado = Api::nuevoModulo()->metodo1();
+
+================================================================================
+  BENEFICIOS DE LA NUEVA ESTRUCTURA
+================================================================================
+
+✅ Código limpio y organizado
+✅ Un solo punto de entrada (api/Api.php)
+✅ Fácil de mantener y extender
+✅ Documentación completa
+✅ Tests automatizados
+✅ Manejo automático de tokens
+✅ Detección automática de entorno
+✅ Manejo consistente de errores
+✅ Compatibilidad con código legacy
+
+================================================================================
+  ARCHIVOS A NO TOCAR (DEPRECADOS)
+================================================================================
+
+NO USAR ESTOS ARCHIVOS (están en /deprecated/):
+   ❌ deprecated/ApiClient.php
+   ❌ deprecated/api_client.php
+   ❌ deprecated/config_api.php
+   ❌ deprecated/token_manager.php
+   ❌ deprecated/endpoint_helpers.php
+
+Se mantienen SOLO como referencia histórica.
+TODO EL CÓDIGO NUEVO DEBE USAR: api/Api.php
+
+================================================================================
+  MIGRACIÓN COMPLETA
+================================================================================
+
+ARCHIVOS MIGRADOS:
+   ✅ Admiin.php             → Usando api/Api.php
+   ✅ AgendaPedidos1.php     → Usando api/Api.php
+   ✅ FormatCancel.php       → Usando api/Api.php
+
+ARCHIVOS POR MIGRAR (cuando sea necesario):
+   ⏳ Menpedidos.php
+   ⏳ MenUsuario.php
+   ⏳ admicome4.php
+   ⏳ ValidarFormatos.php
+   ⏳ descUsuario.php
+   ⏳ dem1.php
+
+Cuando necesites actualizar un archivo, simplemente:
+   1. Cambiar: require_once 'config_api.php'
+      Por: require_once __DIR__ . '/api/Api.php'
+
+   2. Reemplazar llamadas cURL directas por:
+      Api::modulo()->metodo()
+
+   3. Usar Api::isAuthenticated() en lugar de verificaciones manuales
+
+================================================================================
+  CONTACTO Y SOPORTE
+================================================================================
+
+Para reportar problemas:
+   - Revisar api/README.txt
+   - Ejecutar tests/test_api_unificada.php
+   - Revisar logs de PHP (error_log)
+   - Revisar logs del backend Rust
+
+Archivos de configuración:
+   - api/Api.php (configuración y cliente)
+   - api/README.txt (documentación)
+   - ESTRUCTURA_PROYECTO.txt (este archivo)
+
+================================================================================
+  FIN DEL DOCUMENTO
+================================================================================

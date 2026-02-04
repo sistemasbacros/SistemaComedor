@@ -145,9 +145,21 @@ $connectionOptionsBaseNueva = array(
     "TrustServerCertificate" => true
 );
 
+// // Obtener parámetros de fecha del request awquiii
+// $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d');
+// $fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
+
+
 // Obtener parámetros de fecha del request
-$fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d');
-$fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
+// Por defecto: fecha_inicio = ayer, fecha_fin = hoy
+if (isset($_GET['fecha_inicio']) && isset($_GET['fecha_fin'])) {
+    $fecha_inicio = $_GET['fecha_inicio'];
+    $fecha_fin = $_GET['fecha_fin'];
+} else {
+    // Por defecto: mostrar ayer y hoy
+    $fecha_fin = date('Y-m-d');  // Hoy
+    $fecha_inicio = date('Y-m-d', strtotime('-5 day'));  // Ayer
+}
 
 // Validar que fecha_inicio no sea mayor que fecha_fin
 if (strtotime($fecha_inicio) > strtotime($fecha_fin)) {
@@ -155,7 +167,7 @@ if (strtotime($fecha_inicio) > strtotime($fecha_fin)) {
 }
 
 // LISTA DE PERSONAS EXENTAS (NO SE CUENTAN EN MONTOS FINALES)
-// Usamos coincidencias parciales con LIKE
+// Usamos coincidencias parciales con LIKE - ACTUALIZADA CON NUEVAS PERSONAS
 $personas_exentas = [
     'ALEJANDRA CRUZ',
     'ALTA DIRECCION',
@@ -164,7 +176,18 @@ $personas_exentas = [
     'JURIDICO',
     'PALMA TREJO SANDY MARK',
     'REYES QUIROZ HILDA',
-    'VIGILANCIA'
+    'VIGILANCIA',
+    // NUEVAS PERSONAS EXENTAS AGREGADAS
+    'CELAYA YAXI LUIS ENRIQUE',
+    'FIRO CORTAZAR FERNANDO',
+    'ADAME GARCIA JOSE PAUL',
+    'HERRERA CUALI HUGO ALEJANDRO',
+    'REYES FONSECA NORMA ANGELICA',
+    'JUREZ VZQUEZ MIGUEL ANGEL',
+    'SOTO DEL HOYO ISMAEL',
+    'GUTIERREZ EZQUIVEL EDGAR',
+    'CASTILLO NIETO JESSICA',
+    'JOSE FERNANDO OSORIO OJEDA'
 ];
 
 // Crear condiciones LIKE para cada persona exenta
@@ -212,6 +235,10 @@ $total_pagantes = 0;
 $cancelaciones_desayuno = 0;
 $cancelaciones_comida = 0;
 $total_cancelaciones = 0;
+
+// VARIABLE PARA NOTIFICACIONES DE CANCELACIONES PENDIENTES
+$cancelaciones_pendientes = 0;
+$cancelaciones_pendientes_notificacion = '';
 
 // VARIABLES PARA GASTOS DE AMBAS BASES DE DATOS
 $total_gastos_alquimista = 0;
@@ -277,6 +304,16 @@ try {
                 WHEN nombre LIKE '%PALMA TREJO SANDY MARK%' THEN 'PALMA TREJO SANDY MARK'
                 WHEN nombre LIKE '%REYES QUIROZ HILDA%' THEN 'REYES QUIROZ HILDA'
                 WHEN nombre LIKE '%VIGILANCIA%' THEN 'VIGILANCIA'
+                WHEN nombre LIKE '%CELAYA YAXI LUIS ENRIQUE%' THEN 'CELAYA YAXI LUIS ENRIQUE'
+                WHEN nombre LIKE '%FIRO CORTAZAR FERNANDO%' THEN 'FIRO CORTAZAR FERNANDO'
+                WHEN nombre LIKE '%ADAME GARCIA JOSE PAUL%' THEN 'ADAME GARCIA JOSE PAUL'
+                WHEN nombre LIKE '%HERRERA CUALI HUGO ALEJANDRO%' THEN 'HERRERA CUALI HUGO ALEJANDRO'
+                WHEN nombre LIKE '%REYES FONSECA NORMA ANGELICA%' THEN 'REYES FONSECA NORMA ANGELICA'
+                WHEN nombre LIKE '%JUREZ VZQUEZ MIGUEL ANGEL%' THEN 'JUREZ VZQUEZ MIGUEL ANGEL'
+                WHEN nombre LIKE '%SOTO DEL HOYO ISMAEL%' THEN 'SOTO DEL HOYO ISMAEL'
+                WHEN nombre LIKE '%GUTIERREZ EZQUIVEL EDGAR%' THEN 'GUTIERREZ EZQUIVEL EDGAR'
+                WHEN nombre LIKE '%CASTILLO NIETO JESSICA%' THEN 'CASTILLO NIETO JESSICA'
+                WHEN nombre LIKE '%JOSE FERNANDO OSORIO OJEDA%' THEN 'JOSE FERNANDO OSORIO OJEDA'
                 ELSE nombre
             END as persona_exenta,
             -- Desayunos antes y después del cambio
@@ -303,6 +340,16 @@ try {
                 WHEN nombre LIKE '%PALMA TREJO SANDY MARK%' THEN 'PALMA TREJO SANDY MARK'
                 WHEN nombre LIKE '%REYES QUIROZ HILDA%' THEN 'REYES QUIROZ HILDA'
                 WHEN nombre LIKE '%VIGILANCIA%' THEN 'VIGILANCIA'
+                WHEN nombre LIKE '%CELAYA YAXI LUIS ENRIQUE%' THEN 'CELAYA YAXI LUIS ENRIQUE'
+                WHEN nombre LIKE '%FIRO CORTAZAR FERNANDO%' THEN 'FIRO CORTAZAR FERNANDO'
+                WHEN nombre LIKE '%ADAME GARCIA JOSE PAUL%' THEN 'ADAME GARCIA JOSE PAUL'
+                WHEN nombre LIKE '%HERRERA CUALI HUGO ALEJANDRO%' THEN 'HERRERA CUALI HUGO ALEJANDRO'
+                WHEN nombre LIKE '%REYES FONSECA NORMA ANGELICA%' THEN 'REYES FONSECA NORMA ANGELICA'
+                WHEN nombre LIKE '%JUREZ VZQUEZ MIGUEL ANGEL%' THEN 'JUREZ VZQUEZ MIGUEL ANGEL'
+                WHEN nombre LIKE '%SOTO DEL HOYO ISMAEL%' THEN 'SOTO DEL HOYO ISMAEL'
+                WHEN nombre LIKE '%GUTIERREZ EZQUIVEL EDGAR%' THEN 'GUTIERREZ EZQUIVEL EDGAR'
+                WHEN nombre LIKE '%CASTILLO NIETO JESSICA%' THEN 'CASTILLO NIETO JESSICA'
+                WHEN nombre LIKE '%JOSE FERNANDO OSORIO OJEDA%' THEN 'JOSE FERNANDO OSORIO OJEDA'
                 ELSE nombre
             END
         ORDER BY total_consumos DESC";
@@ -480,6 +527,38 @@ try {
                 $cancelaciones_desayuno = $row['CancelacionesDesayuno'] ?? 0;
                 $cancelaciones_comida = $row['CancelacionesComida'] ?? 0;
                 $total_cancelaciones = $row['TotalRegistros'] ?? 0;
+            }
+        }
+        
+        // NUEVA CONSULTA: CANCELACIONES PENDIENTES PARA NOTIFICACIONES (ESTATUS DIFERENTE DE 'APROBADO')
+        $sql_cancelaciones_pendientes = "SELECT 
+                                COUNT(*) as TotalPendientes,
+                                COUNT(CASE 
+                                    WHEN tipo_consumo = 'Desayuno' THEN 1
+                                    WHEN tipo_consumo = 'Ambos' THEN 1
+                                    ELSE 0 
+                                END) as PendientesDesayuno,
+                                COUNT(CASE 
+                                    WHEN tipo_consumo = 'Comida' THEN 1
+                                    WHEN tipo_consumo = 'Ambos' THEN 1
+                                    ELSE 0 
+                                END) as PendientesComida
+                              FROM cancelaciones
+                              WHERE ESTATUS != 'APROBADO' and  NOT ESTATUS = 'RECHAZADO'
+                              AND ESTATUS IS NOT NULL AND YEAR(convert(date, FECHA, 102)) = 2026";
+        
+        $stmt_pendientes = sqlsrv_query($conn, $sql_cancelaciones_pendientes);
+        
+        if ($stmt_pendientes !== false) {
+            $row = sqlsrv_fetch_array($stmt_pendientes, SQLSRV_FETCH_ASSOC);
+            if ($row) {
+                $cancelaciones_pendientes = $row['TotalPendientes'] ?? 0;
+                $pendientes_desayuno = $row['PendientesDesayuno'] ?? 0;
+                $pendientes_comida = $row['PendientesComida'] ?? 0;
+                
+                if ($cancelaciones_pendientes > 0) {
+                    $cancelaciones_pendientes_notificacion = "⚠️ Tienes $cancelaciones_pendientes cancelaciones pendientes de revisión ($pendientes_desayuno desayunos, $pendientes_comida comidas)";
+                }
             }
         }
         
@@ -833,14 +912,14 @@ $fecha_cambio = strtotime($fecha_cambio_precios);
 
 $incluye_viejo_precio = ($periodo_inicio < $fecha_cambio);
 $incluye_nuevo_precio = ($periodo_fin >= $fecha_cambio);
-$periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
+$periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portal de Comedor - Administración <?php echo !$acceso_completo ? '(Acceso Restringido)' : 'Completa'; ?></title>
+    <title>Portal de Comedor - Administración1 <?php echo !$acceso_completo ? '(Acceso Restringido)' : 'Completa'; ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -871,6 +950,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
             --hover-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
             --glass-bg: rgba(255, 255, 255, 0.8);
             --glass-border: rgba(255, 255, 255, 0.5);
+            --notification-color: #dc2626;
         }
         
         body {
@@ -1690,6 +1770,102 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
             opacity: 0.9;
         }
         
+        /* NOTIFICACIÓN DE CANCELACIONES PENDIENTES */
+        .notification-badge {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--danger-color), #dc2626);
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-left: 5px;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+        }
+        
+        .notification-bell {
+            position: relative;
+            font-size: 1.3rem;
+            color: white;
+            animation: ring 2s infinite;
+        }
+        
+        .notification-container {
+            position: absolute;
+            top: 70px;
+            right: 25px;
+            z-index: 1000;
+        }
+        
+        .notification-alert {
+            background: linear-gradient(135deg, var(--danger-color), #dc2626);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(239, 68, 68, 0.3);
+            animation: slideDown 0.5s ease;
+            max-width: 350px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+        }
+        
+        .notification-alert h6 {
+            margin: 0 0 10px 0;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .notification-alert p {
+            margin: 0;
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .notification-close {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+        
+        .notification-close:hover {
+            opacity: 1;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        
+        @keyframes ring {
+            0% { transform: rotate(0deg); }
+            5% { transform: rotate(15deg); }
+            10% { transform: rotate(-15deg); }
+            15% { transform: rotate(15deg); }
+            20% { transform: rotate(-15deg); }
+            25% { transform: rotate(0deg); }
+            100% { transform: rotate(0deg); }
+        }
+        
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
         .filters-container {
             background: var(--white-pearl);
             border-radius: 16px;
@@ -2255,6 +2431,15 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
             .inventario-stats-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
+            
+            .notification-container {
+                top: 80px;
+                right: 15px;
+            }
+            
+            .notification-alert {
+                max-width: 300px;
+            }
         }
         
         @media (max-width: 768px) {
@@ -2294,6 +2479,15 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
             .inventario-stats-grid {
                 grid-template-columns: 1fr;
             }
+            
+            .notification-container {
+                position: static;
+                margin-top: 10px;
+            }
+            
+            .notification-alert {
+                max-width: 100%;
+            }
         }
         
         @media (max-width: 576px) {
@@ -2326,6 +2520,16 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
             .exento-desglose-summary {
                 flex-direction: column;
                 gap: 5px;
+            }
+            
+            .notification-badge {
+                width: 20px;
+                height: 20px;
+                font-size: 0.65rem;
+            }
+            
+            .notification-bell {
+                font-size: 1.1rem;
             }
         }
     </style>
@@ -2386,6 +2590,9 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                 <li class="nav-item">
                     <a class="nav-link <?php echo (isset($_GET['section']) && $_GET['section'] == 'cancelaciones') ? 'active' : ''; ?>" href="#" data-section="cancelaciones">
                         <i class="fas fa-times-circle"></i> Validar Cancelaciones
+                        <?php if ($acceso_completo && $cancelaciones_pendientes > 0): ?>
+                        <span class="notification-badge"><?php echo $cancelaciones_pendientes; ?></span>
+                        <?php endif; ?>
                     </a>
                 </li>
             <?php else: ?>
@@ -2466,8 +2673,31 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                     <div class="badge bg-warning ms-2">Acceso Restringido</div>
                     <?php endif; ?>
                 </div>
+                
+                <!-- Notificación de Cancelaciones Pendientes -->
+                <?php if ($acceso_completo && $cancelaciones_pendientes > 0): ?>
+                <div class="notification-bell" id="notificationBell" title="<?php echo htmlspecialchars($cancelaciones_pendientes_notificacion); ?>">
+                    <i class="fas fa-bell"></i>
+                    <span class="notification-badge"><?php echo $cancelaciones_pendientes; ?></span>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
+
+        <!-- Contenedor para Notificación de Cancelaciones Pendientes -->
+        <?php if ($acceso_completo && $cancelaciones_pendientes > 0): ?>
+        <div class="notification-container" id="notificationContainer" style="display: none;">
+            <div class="notification-alert">
+                <button class="notification-close" id="notificationClose">&times;</button>
+                <h6>
+                    <i class="fas fa-bell"></i>
+                    ¡Cancelaciones Pendientes!
+                </h6>
+                <p><?php echo htmlspecialchars($cancelaciones_pendientes_notificacion); ?></p>
+                <p class="mt-2 mb-0"><small><i class="fas fa-lightbulb me-1"></i>Accede a la sección "Validar Cancelaciones" para revisarlas.</small></p>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <?php if ($acceso_completo): ?>
         <!-- Dashboard Section - SOLO PARA USUARIOS CON ACCESO COMPLETO -->
@@ -2527,6 +2757,20 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                         </div>
                     </div>
                     <?php endif; ?>
+                    
+                    <!-- NOTA SOBRE PERSONAS EXENTAS AGREGADAS -->
+                    <div class="price-change-notice mt-3" style="border-left-color: var(--purple-color); background: rgba(139, 92, 246, 0.1);">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-user-friends text-purple me-3"></i>
+                            <div>
+                                <strong class="text-purple">Nota sobre Personas Exentas:</strong>
+                                <p class="mb-0">
+                                    Se han agregado <?php echo (count($personas_exentas) - 8); ?> nuevas personas exentas al sistema. 
+                                    Total actual: <strong><?php echo count($personas_exentas); ?> personas exentas</strong>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </form>
             </div>
             
@@ -2655,7 +2899,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                     </small>
                 </div>
                 
-                <!-- CARD - PERSONAS EXENTAS -->
+                <!-- CARD - PERSONAS EXENTAS ACTUALIZADA -->
                 <div class="card comparison-card exentos">
                     <div class="comparison-icon exentos">
                         <i class="fas fa-user-slash"></i>
@@ -2664,6 +2908,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                         <?php if ($periodo_mixto_precios): ?>
                         <span class="price-info-badge">Precios Mixtos</span>
                         <?php endif; ?>
+                        <span class="badge bg-purple ms-1"><?php echo count($personas_exentas); ?> pers.</span>
                     </h4>
                     
                     <div class="comparison-stats">
@@ -2719,7 +2964,13 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                     <div class="comparison-icon cancelaciones">
                         <i class="fas fa-times-circle"></i>
                     </div>
-                    <h4 class="mb-3">Cancelaciones</h4>
+                    <h4 class="mb-3">Cancelaciones
+                        <?php if ($cancelaciones_pendientes > 0): ?>
+                        <span class="badge bg-danger ms-1 notification-badge-small" style="animation: pulse 2s infinite; background: var(--danger-color); color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7rem;">
+                            <?php echo $cancelaciones_pendientes; ?> pendientes
+                        </span>
+                        <?php endif; ?>
+                    </h4>
                     
                     <div class="comparison-stats">
                         <div class="stat-item">
@@ -2733,7 +2984,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                     </div>
                     
                     <div class="cancelaciones-total">
-                        Total: <?php echo $total_cancelaciones; ?> registros
+                        Total: <?php echo $total_cancelaciones; ?> registros aprobados
                     </div>
                     
                     <div class="progress-comparison">
@@ -2752,6 +3003,9 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                             echo 'Sin cancelaciones aprobadas';
                         }
                         ?>
+                        <?php if ($cancelaciones_pendientes > 0): ?>
+                        <br><span class="text-danger"><i class="fas fa-exclamation-triangle me-1"></i><?php echo $cancelaciones_pendientes; ?> pendientes de revisión</span>
+                        <?php endif; ?>
                     </small>
                 </div>
                 
@@ -3039,6 +3293,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                                         <?php if ($periodo_mixto_precios): ?>
                                         <span class="badge bg-info">Precios Mixtos</span>
                                         <?php endif; ?>
+                                        <span class="badge bg-purple ms-1"><?php echo count($personas_exentas); ?> pers.</span>
                                     </div>
                                     <div class="finance-amount exentos">
                                         $<?php echo number_format($monto_exentos, 2, '.', ','); ?>
@@ -3091,6 +3346,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                                         <div class="exento-desglose-header">
                                             <div class="exento-desglose-title">
                                                 <i class="fas fa-list-alt me-2"></i>Desglose por Persona Exenta
+                                                <span class="badge bg-purple ms-2"><?php echo count($personas_exentas); ?> personas</span>
                                             </div>
                                             <div class="exento-desglose-summary">
                                                 <div class="summary-item">
@@ -3289,11 +3545,9 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                                 <div>
                                     <h6 class="mb-0">Comidas Exentas</h6>
                                     <small class="text-muted"><?php echo $exentos_total_servidos; ?> comidas (<?php echo $exentos_desayuno_servidos; ?> desayunos, <?php echo $exentos_comida_servidos; ?> comidas)</small>
-                                    <?php if ($periodo_mixto_precios): ?>
                                     <div class="price-subtext">
-                                        Monto no cobrado: $<?php echo number_format($monto_exentos, 2, '.', ','); ?>
+                                        <?php echo count($personas_exentas); ?> personas exentas | $<?php echo number_format($monto_exentos, 2, '.', ','); ?> no cobrados
                                     </div>
-                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="activity-item">
@@ -3312,6 +3566,11 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                                 <div>
                                     <h6 class="mb-0">Cancelaciones</h6>
                                     <small class="text-muted"><?php echo $cancelaciones_desayuno; ?> desayunos, <?php echo $cancelaciones_comida; ?> comidas (solo aprobadas)</small>
+                                    <?php if ($cancelaciones_pendientes > 0): ?>
+                                    <div class="price-subtext text-danger">
+                                        <i class="fas fa-exclamation-triangle me-1"></i><?php echo $cancelaciones_pendientes; ?> pendientes de revisión
+                                    </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="activity-item">
@@ -3370,6 +3629,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                 <div class="card-body p-0 position-relative">
                     <div id="usuarios-loading" class="loading-overlay"><div class="loading-spinner"></div><div class="loading-text">Cargando sistema de gestión de usuarios...</div></div>
                     <div class="report-iframe-container">
+
                         <iframe src="http://desarollo-bacros/Comedor/gestusu.php" class="report-iframe" id="usuarios-iframe" onload="document.getElementById('usuarios-loading').style.display='none';"></iframe>
                     </div>
                 </div>
@@ -3529,6 +3789,9 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
         
         // Determinar si el usuario tiene acceso completo
         const accesoCompleto = <?php echo $acceso_completo ? 'true' : 'false'; ?>;
+        
+        // Verificar si hay cancelaciones pendientes
+        const cancelacionesPendientes = <?php echo $cancelaciones_pendientes; ?>;
         
         // Función para restablecer filtros
         function resetFilters() {
@@ -3694,6 +3957,53 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
             }
         });
 
+        // SISTEMA DE NOTIFICACIONES DE CANCELACIONES PENDIENTES
+        const notificationBell = document.getElementById('notificationBell');
+        const notificationContainer = document.getElementById('notificationContainer');
+        const notificationClose = document.getElementById('notificationClose');
+        
+        if (notificationBell && notificationContainer) {
+            // Mostrar/ocultar notificación al hacer clic en la campana
+            notificationBell.addEventListener('click', function() {
+                if (notificationContainer.style.display === 'none' || notificationContainer.style.display === '') {
+                    notificationContainer.style.display = 'block';
+                    // Ocultar después de 10 segundos
+                    setTimeout(() => {
+                        notificationContainer.style.display = 'none';
+                    }, 10000);
+                } else {
+                    notificationContainer.style.display = 'none';
+                }
+            });
+            
+            // Cerrar notificación con el botón X
+            if (notificationClose) {
+                notificationClose.addEventListener('click', function() {
+                    notificationContainer.style.display = 'none';
+                });
+            }
+            
+            // Mostrar notificación automáticamente al cargar la página si hay pendientes
+            if (cancelacionesPendientes > 0) {
+                setTimeout(() => {
+                    notificationContainer.style.display = 'block';
+                    
+                    // Sonido de notificación (opcional)
+                    try {
+                        const audio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ');
+                        audio.play();
+                    } catch (e) {
+                        console.log('Audio no soportado');
+                    }
+                    
+                    // Ocultar después de 15 segundos
+                    setTimeout(() => {
+                        notificationContainer.style.display = 'none';
+                    }, 15000);
+                }, 2000);
+            }
+        }
+
         // Chart initialization
         document.addEventListener('DOMContentLoaded', function() {
             // Main Stats Chart (Doughnut) - Actualizado para incluir pagantes vs exentos con precios diferenciados
@@ -3816,6 +4126,19 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                         }, 500);
                     }
                 }
+                
+                // Mostrar notificación de personas exentas agregadas
+                if (accesoCompleto && <?php echo (count($personas_exentas) - 8) > 0 ? 'true' : 'false'; ?>) {
+                    const personasAgregadas = <?php echo (count($personas_exentas) - 8); ?>;
+                    const totalPersonas = <?php echo count($personas_exentas); ?>;
+                    
+                    if (!sessionStorage.getItem('exentosNotificados')) {
+                        setTimeout(() => {
+                            alert(`Se han agregado ${personasAgregadas} nuevas personas exentas al sistema.\n\nTotal actual: ${totalPersonas} personas exentas\n\nEstas personas no se contarán en los montos recaudados finales.`);
+                            sessionStorage.setItem('exentosNotificados', 'true');
+                        }, 1000);
+                    }
+                }
             }, 1500);
         });
 
@@ -3830,12 +4153,24 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
         const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
         const tooltipList = [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
         
-        // Agregar color personalizado para el badge de inventario
+        // Agregar color personalizado para el badge de inventario y exentos
         const style = document.createElement('style');
         style.textContent = `
             .bg-bronze {
                 background-color: var(--bronze-color) !important;
                 color: white !important;
+            }
+            .bg-purple {
+                background-color: var(--purple-color) !important;
+                color: white !important;
+            }
+            .notification-badge-small {
+                background-color: var(--danger-color) !important;
+                color: white !important;
+                padding: 2px 6px;
+                border-radius: 10px;
+                font-size: 0.7rem;
+                animation: pulse 2s infinite;
             }
         `;
         document.head.appendChild(style);
@@ -3860,6 +4195,21 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precios);
                 }
             }
         });
+        
+        // Función para solicitar permisos de notificación del navegador
+        function requestNotificationPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                        console.log('Permiso para notificaciones concedido');
+                    }
+                });
+            }
+        }
+        
+        // Llamar a la función cuando se cargue la página
+        window.addEventListener('load', requestNotificationPermission);
     </script>
+	
 </body>
 </html>
