@@ -334,7 +334,7 @@ jobs:
       
       - name: 📧 Notify on failure
         if: failure()
-        shell: pwsh
+        shell: powershell
         run: |
           Write-Host ''
           Write-Host '============================================================='
@@ -343,6 +343,5 @@ jobs:
           Write-Host ''
           Write-Host 'INFO: Revisa los logs del workflow en GitHub Actions'
           Write-Host 'INFO: Revisa los logs de contenedores con:'
-          $composeFile = $env:COMPOSE_FILE
-          Write-Host "       docker compose -f $composeFile logs"
+          Write-Host ('       docker compose -f ' + $env:COMPOSE_FILE + ' logs')
           Write-Host ''
