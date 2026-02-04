@@ -142,11 +142,12 @@ jobs:
           if (Test-Path $composeFile) {
             Write-Host "INFO: Deteniendo contenedores de PRODUCCION..."
             try {
-              docker compose -f $env:COMPOSE_FILE down 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
-              if ($LASTEXITCODE -eq 0) {
+              docker compose -f $env:COMPOSE_FILE down
+              $downExitCode = $LASTEXITCODE
+              if ($downExitCode -eq 0) {
                 Write-Host "OK: Contenedores detenidos"
               } else {
-                Write-Host "WARNING: Error al detener contenedores (Exit code: $LASTEXITCODE)"
+                Write-Host "WARNING: Error al detener contenedores (Exit code: $downExitCode)"
                 Write-Host "INFO: Intentando forzar limpieza de contenedores..."
                 docker ps -a --filter "name=comedor_*" --format "{{.ID}}" | Where-Object { $_ -notmatch "test" } | ForEach-Object {
                   docker rm -f $_ 2>&1 | Out-Null
@@ -179,13 +180,13 @@ jobs:
           }
 
           # Construir imágenes
-          $buildOutput = docker compose -f $env:COMPOSE_FILE build 2>&1
-          $buildOutput | ForEach-Object { Write-Host $_ }
+          docker compose -f $env:COMPOSE_FILE build
+          $buildExitCode = $LASTEXITCODE
 
-          if ($LASTEXITCODE -eq 0) {
+          if ($buildExitCode -eq 0) {
             Write-Host "OK: Imagenes construidas exitosamente"
           } else {
-            Write-Host "ERROR: Error al construir imagenes (Exit code: $LASTEXITCODE)"
+            Write-Host "ERROR: Error al construir imagenes (Exit code: $buildExitCode)"
             Write-Host "ERROR: Revisa los logs arriba para más detalles"
             Write-Host ""
             Write-Host "--- INFORMACION DE DIAGNOSTICO ---"
