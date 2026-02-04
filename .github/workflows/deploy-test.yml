@@ -76,14 +76,62 @@ jobs:
       
       - name: 🐳 Verify Docker installation
         run: |
+          Write-Host "INFO: Verificando instalación de Docker..."
+
+          # Verificar si Docker está disponible
+          $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+          if (-not $dockerCmd) {
+            Write-Host "ERROR: Docker no está instalado o no está en el PATH"
+            Write-Host "ERROR: Por favor instala Docker Engine en Windows Server"
+            exit 1
+          }
+
+          # Obtener versión de Docker
           try {
-            $dockerVersion = docker --version
+            $dockerVersion = docker --version 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              throw "Docker no respondió correctamente"
+            }
             Write-Host "OK: Docker instalado: $dockerVersion"
-            
-            $composeVersion = docker compose version
+          } catch {
+            Write-Host "ERROR: Docker está instalado pero no responde"
+            Write-Host "ERROR: Verifica que el servicio Docker esté corriendo: Get-Service docker"
+            exit 1
+          }
+
+          # Verificar Docker Compose
+          try {
+            $composeVersion = docker compose version 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              throw "Docker Compose no respondió correctamente"
+            }
             Write-Host "OK: Docker Compose instalado: $composeVersion"
           } catch {
-            Write-Host "ERROR: Docker no está instalado o no está en el PATH"
+            Write-Host "ERROR: Docker Compose no está disponible"
+            Write-Host "ERROR: Asegúrate de tener Docker con plugin de Compose instalado"
+            exit 1
+          }
+
+          # Verificar conectividad con el daemon de Docker
+          try {
+            docker ps > $null 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "OK: Docker daemon está corriendo y accesible"
+            } else {
+              Write-Host "WARNING: Docker daemon no responde. Intentando iniciar el servicio..."
+              Start-Service docker -ErrorAction Stop
+              Start-Sleep -Seconds 5
+              docker ps > $null 2>&1
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "OK: Servicio Docker iniciado correctamente"
+              } else {
+                throw "No se puede conectar al daemon de Docker"
+              }
+            }
+          } catch {
+            Write-Host "ERROR: No se puede conectar al daemon de Docker"
+            Write-Host "ERROR: Verifica que el servicio esté corriendo: Get-Service docker"
+            Write-Host "ERROR: Si es necesario, inicia el servicio: Start-Service docker"
             exit 1
           }
         shell: powershell
@@ -91,13 +139,28 @@ jobs:
       - name: 🛑 Stop current containers
         run: |
           cd $env:DEPLOY_PATH
-          
-          if (Test-Path "$env:COMPOSE_FILE") {
+
+          $composeFile = Join-Path $env:DEPLOY_PATH $env:COMPOSE_FILE
+          if (Test-Path $composeFile) {
             Write-Host "INFO: Deteniendo contenedores existentes..."
-            docker compose -f $env:COMPOSE_FILE down
-            Write-Host "OK: Contenedores detenidos"
+            try {
+              docker compose -f $env:COMPOSE_FILE down 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "OK: Contenedores detenidos"
+              } else {
+                Write-Host "WARNING: Error al detener contenedores (Exit code: $LASTEXITCODE)"
+                Write-Host "INFO: Intentando forzar limpieza de contenedores..."
+                docker ps -a --filter "name=comedor_*_test" --format "{{.ID}}" | ForEach-Object {
+                  docker rm -f $_ 2>&1 | Out-Null
+                }
+                Write-Host "OK: Limpieza forzada completada"
+              }
+            } catch {
+              Write-Host "WARNING: No se pudieron detener los contenedores: $_"
+              Write-Host "INFO: Continuando con el despliegue..."
+            }
           } else {
-            Write-Host "INFO: No hay contenedores corriendo"
+            Write-Host "INFO: No hay archivo compose previo"
           }
         shell: powershell
         continue-on-error: true
@@ -105,14 +168,34 @@ jobs:
       - name: 🏗️ Build Docker images
         run: |
           cd $env:DEPLOY_PATH
-          
+
           Write-Host "INFO: Construyendo imágenes Docker..."
-          docker compose -f $env:COMPOSE_FILE build --no-cache
-          
+          Write-Host "INFO: Directorio actual: $(Get-Location)"
+          Write-Host "INFO: Archivo compose: $env:COMPOSE_FILE"
+
+          # Verificar que el Dockerfile existe
+          if (-not (Test-Path "Dockerfile")) {
+            Write-Host "ERROR: Dockerfile no encontrado en $(Get-Location)"
+            Get-ChildItem -Path . -Force | Select-Object Name, LastWriteTime | Format-Table -AutoSize
+            exit 1
+          }
+
+          # Construir sin caché para asegurar última versión
+          $buildOutput = docker compose -f $env:COMPOSE_FILE build --no-cache 2>&1
+          $buildOutput | ForEach-Object { Write-Host $_ }
+
           if ($LASTEXITCODE -eq 0) {
             Write-Host "OK: Imágenes construidas exitosamente"
           } else {
-            Write-Host "ERROR: Error al construir imágenes"
+            Write-Host "ERROR: Error al construir imágenes (Exit code: $LASTEXITCODE)"
+            Write-Host "ERROR: Revisa los logs arriba para más detalles"
+            Write-Host ""
+            Write-Host "--- INFORMACION DE DIAGNOSTICO ---"
+            Write-Host "Docker version:"
+            docker --version
+            Write-Host ""
+            Write-Host "Docker info:"
+            docker info 2>&1 | Select-String -Pattern "Server Version|Operating System|OSType|Architecture"
             exit 1
           }
         shell: powershell
@@ -258,6 +341,6 @@ jobs:
           Write-Host ''
           Write-Host "INFO: Revisa los logs del workflow en GitHub Actions"
           Write-Host "INFO: Revisa los logs de contenedores con:"
-          Write-Host "       docker compose -f $env:COMPOSE_FILE logs"
+          Write-Host "       docker compose -f $($env:COMPOSE_FILE) logs"
           Write-Host ''
         shell: powershell
