@@ -294,6 +294,7 @@ jobs:
       
       - name: 📧 Notify on failure
         if: failure()
+        shell: pwsh
         run: |
           Write-Host ""
           Write-Host "============================================================="
@@ -305,4 +306,3 @@ jobs:
           Write-Host "       cd $env:DEPLOY_PATH"
           Write-Host "       docker compose -f $env:COMPOSE_FILE logs"
           Write-Host ""
-        shell: powershell
