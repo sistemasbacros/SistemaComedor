@@ -224,6 +224,7 @@ jobs:
         shell: powershell
       
       - name: 🏥 Health check
+        continue-on-error: true
         run: |
           Write-Host "INFO: Verificando salud del servidor de PRODUCCION..."
           
@@ -249,8 +250,7 @@ jobs:
             Write-Host "INFO: Los contenedores estan corriendo correctamente"
           }
         shell: powershell
-        continue-on-error: true
-      
+
       - name: 🧹 Clean old images
         run: |
           Write-Host "INFO: Limpiando imagenes antiguas..."
