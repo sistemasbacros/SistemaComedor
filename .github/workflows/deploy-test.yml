@@ -334,14 +334,15 @@ jobs:
       
       - name: 📧 Notify on failure
         if: failure()
+        shell: pwsh
         run: |
           Write-Host ''
-          Write-Host "============================================================="
-          Write-Host "          DESPLIEGUE EN TEST FALLÓ"
-          Write-Host "============================================================="
+          Write-Host '============================================================='
+          Write-Host '          DESPLIEGUE EN TEST FALLO'
+          Write-Host '============================================================='
           Write-Host ''
-          Write-Host "INFO: Revisa los logs del workflow en GitHub Actions"
-          Write-Host "INFO: Revisa los logs de contenedores con:"
-          Write-Host "       docker compose -f $env:COMPOSE_FILE logs"
+          Write-Host 'INFO: Revisa los logs del workflow en GitHub Actions'
+          Write-Host 'INFO: Revisa los logs de contenedores con:'
+          $composeFile = $env:COMPOSE_FILE
+          Write-Host "       docker compose -f $composeFile logs"
           Write-Host ''
-        shell: powershell
