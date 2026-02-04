@@ -301,7 +301,7 @@ jobs:
           Write-Host ""
           Write-Host "INFO: Revisa los logs del workflow en GitHub Actions"
           Write-Host "INFO: Revisa los logs de contenedores con:"
-          Write-Host "       cd $($env:DEPLOY_PATH)"
-          Write-Host "       docker compose -f $($env:COMPOSE_FILE) logs"
+          Write-Host "       cd $env:DEPLOY_PATH"
+          Write-Host "       docker compose -f $env:COMPOSE_FILE logs"
           Write-Host ""
         shell: powershell
