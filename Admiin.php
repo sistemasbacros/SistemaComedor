@@ -1,4 +1,7 @@
 <?php
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
+
 // Configuración de sesión mejorada
 session_set_cookie_params([
     'lifetime' => 0,
@@ -18,14 +21,10 @@ header("X-Content-Type-Options: nosniff");
 // Iniciar sesión
 session_start();
 
-// Configuración de conexión a la base de datos
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8"
-);
+// Obtener configuración de base de datos desde .env
+$dbConfig = getComedorConfig();
+$serverName = $dbConfig['serverName'];
+$connectionOptions = $dbConfig['connectionOptions'];
 
 // Variables para el estado del login
 $loginError = '';

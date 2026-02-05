@@ -1,4 +1,7 @@
 <?php
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
+
 // --- Conexión a SQL Server ---
 $serverName = "DESAROLLO‑BACRO\\SQLEXPRESS";
 $connectionOptions = [

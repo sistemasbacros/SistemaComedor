@@ -362,6 +362,8 @@ function ExportToExcel(type, fn, dl) {
 
 
 <?php
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
 
 $mes = $mes1 = $mes2 = $mes3 = $mes4 = $mes5 = $prueba = $prueba1 = $prueba2 = $prueba3 = $prueba4  = $prueba5;
 

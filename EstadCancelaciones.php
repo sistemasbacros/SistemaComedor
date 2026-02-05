@@ -62,7 +62,8 @@ FECHA: <input type="text" name="name1234" id="name1234" >&nbsp&nbsp<button  type
 
 
 <?php
-
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
 
 $pedido = $name = $email = $gender = $comment = $website = "";
 

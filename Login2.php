@@ -157,6 +157,8 @@ hr {
 
 
 <?php
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
 
 $usuario = $contrase = $valor;
 

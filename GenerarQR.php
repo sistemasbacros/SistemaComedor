@@ -138,6 +138,8 @@ body {
 </body>
 </html>
 <?php
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
 
 // $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
 // $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02","CharacterSet" => "UTF-8");

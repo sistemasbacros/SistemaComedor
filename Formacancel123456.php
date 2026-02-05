@@ -1,4 +1,7 @@
 <?php
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
+
 // ----------------------- PHP BACKEND ---------------------------
 header('Content-Type: text/html; charset=UTF-8');
 ini_set('default_charset', 'UTF-8');

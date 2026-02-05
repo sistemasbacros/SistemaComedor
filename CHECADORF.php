@@ -697,8 +697,7 @@
     $firstday = date('Y-m-d', strtotime("this week"));
     
     // Conexión a base de datos
-    $serverName = "DESAROLLO-BACRO\SQLEXPRESS";
-    $connectionInfo = array("Database" => "Comedor", "UID" => "Larome03", "PWD" => "Larome03", "CharacterSet" => "UTF-8");
+    $dbConfig = getComedorConfig(); $serverName = $dbConfig['serverName']; $connectionInfo = $dbConfig['connectionOptions'];
     $conn = sqlsrv_connect($serverName, $connectionInfo);
     
     // Consulta para totales actuales

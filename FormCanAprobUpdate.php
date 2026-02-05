@@ -1,5 +1,8 @@
 
 <?php
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
+
 $arrayRecibido=json_decode($_POST["arrayDeValores"], true );
  
 echo "Hemos recibido en el PHP un array de ".count($arrayRecibido)." elementos de luis123232";
