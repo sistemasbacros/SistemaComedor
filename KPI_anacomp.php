@@ -1967,7 +1967,7 @@ if( $conn ) {
 ////////////////// Select
 
 // $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02");
+// $dbConfig = getComedorConfig(); $connectionInfo = $dbConfig['connectionOptions'];
 // $conn = sqlsrv_connect( $serverName, $connectionInfo);
 
 // if( $conn ) {

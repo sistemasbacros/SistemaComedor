@@ -13,14 +13,7 @@ if (!isset($_SESSION['authenticated_from_login']) || $_SESSION['authenticated_fr
 }
 
 // Configuración de conexión a la base de datos
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
+$dbConfig = getComedorConfig(); $serverName = $dbConfig['serverName']; $connectionOptions = $dbConfig['connectionOptions'];
 
 $response = ['success' => false, 'pending_count' => 0, 'details' => []];
 

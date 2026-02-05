@@ -1,4 +1,7 @@
 <?php
+// Cargar configuración de base de datos desde .env
+require_once __DIR__ . '/config/database.php';
+
 ////////////////// Insert
 $serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
 $connectionInfo = array( "Database"=>"Ticket", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");

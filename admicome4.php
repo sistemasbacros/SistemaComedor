@@ -119,24 +119,10 @@ if (!$acceso_completo) {
 // ==================================================
 
 // Configuración de conexión a la base de datos principal
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
+$dbConfig = getComedorConfig(); $serverName = $dbConfig['serverName']; $connectionOptions = $dbConfig['connectionOptions'];
 
 // Configuración de conexión a Contpaq i Comedor - Alquimista
-$serverNameContpaq = "WIN-44O80L37Q7M\COMERCIAL";
-$connectionOptionsContpaq = array(
-    "Database" => "ALQUIMISTA2024",
-    "Uid" => "sa",
-    "PWD" => "Administrador1*",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
+$dbConfigAlq = getAlquimistaConfig(); $serverNameContpaq = $dbConfigAlq['serverName']; $connectionOptionsContpaq = $dbConfigAlq['connectionOptions'];
 
 // NUEVA CONFIGURACIÓN: Conexión a Contpaq i Comedor - BASENUEVA
 $serverNameBaseNueva = "WIN-44O80L37Q7M\COMERCIAL"; // Mismo servidor

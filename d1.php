@@ -8,7 +8,7 @@ $pedido = $name = $email = $gender = $comment = $website = "";
 
 
 $serverName = "BACROCORP01\BACROSSQL"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"sa", "PWD"=>"Larome02","CharacterSet" => "UTF-8");
+$dbConfig = getComedorConfig(); $connectionInfo = $dbConfig['connectionOptions'];
 $conn = sqlsrv_connect( $serverName, $connectionInfo);
 
 // if( $conn ) {

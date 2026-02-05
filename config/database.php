@@ -194,6 +194,86 @@ function getBaseNuevaConfig() {
 }
 
 /**
+ * Obtener conexión a la base de datos KPI
+ *
+ * @return resource|false Conexión SQL Server o false en caso de error
+ */
+function getKpiConnection() {
+    $serverName = env('DB_KPI_SERVER', 'DESAROLLO-BACRO\SQLEXPRESS');
+    $connectionOptions = array(
+        "Database" => env('DB_KPI_DATABASE', 'KPI'),
+        "Uid" => env('DB_KPI_USERNAME', 'Larome03'),
+        "PWD" => env('DB_KPI_PASSWORD', 'Larome03'),
+        "CharacterSet" => env('DB_KPI_CHARSET', 'UTF-8')
+    );
+
+    $conn = sqlsrv_connect($serverName, $connectionOptions);
+
+    if (!$conn) {
+        error_log("Error de conexión a KPI: " . print_r(sqlsrv_errors(), true));
+    }
+
+    return $conn;
+}
+
+/**
+ * Obtener configuración de conexión a KPI (sin conectar)
+ *
+ * @return array Array con serverName y connectionOptions
+ */
+function getKpiConfig() {
+    return [
+        'serverName' => env('DB_KPI_SERVER', 'DESAROLLO-BACRO\SQLEXPRESS'),
+        'connectionOptions' => array(
+            "Database" => env('DB_KPI_DATABASE', 'KPI'),
+            "Uid" => env('DB_KPI_USERNAME', 'Larome03'),
+            "PWD" => env('DB_KPI_PASSWORD', 'Larome03'),
+            "CharacterSet" => env('DB_KPI_CHARSET', 'UTF-8')
+        )
+    ];
+}
+
+/**
+ * Obtener conexión a la base de datos TICKET
+ *
+ * @return resource|false Conexión SQL Server o false en caso de error
+ */
+function getTicketConnection() {
+    $serverName = env('DB_TICKET_SERVER', 'DESAROLLO-BACRO\SQLEXPRESS');
+    $connectionOptions = array(
+        "Database" => env('DB_TICKET_DATABASE', 'Ticket'),
+        "Uid" => env('DB_TICKET_USERNAME', 'Larome03'),
+        "PWD" => env('DB_TICKET_PASSWORD', 'Larome03'),
+        "CharacterSet" => env('DB_TICKET_CHARSET', 'UTF-8')
+    );
+
+    $conn = sqlsrv_connect($serverName, $connectionOptions);
+
+    if (!$conn) {
+        error_log("Error de conexión a Ticket: " . print_r(sqlsrv_errors(), true));
+    }
+
+    return $conn;
+}
+
+/**
+ * Obtener configuración de conexión a TICKET (sin conectar)
+ *
+ * @return array Array con serverName y connectionOptions
+ */
+function getTicketConfig() {
+    return [
+        'serverName' => env('DB_TICKET_SERVER', 'DESAROLLO-BACRO\SQLEXPRESS'),
+        'connectionOptions' => array(
+            "Database" => env('DB_TICKET_DATABASE', 'Ticket'),
+            "Uid" => env('DB_TICKET_USERNAME', 'Larome03'),
+            "PWD" => env('DB_TICKET_PASSWORD', 'Larome03'),
+            "CharacterSet" => env('DB_TICKET_CHARSET', 'UTF-8')
+        )
+    ];
+}
+
+/**
  * ============================================================================
  * FUNCIONES HELPER PARA COMPATIBILIDAD
  * ============================================================================
@@ -217,7 +297,7 @@ function closeConnection($conn, $stmt = null) {
 /**
  * Obtener string de conexión para debugging
  *
- * @param string $dbName Nombre de la base de datos (comedor|alquimista|basenueva)
+ * @param string $dbName Nombre de la base de datos (comedor|alquimista|basenueva|kpi|ticket)
  * @return string String de conexión (sin contraseña)
  */
 function getConnectionString($dbName = 'comedor') {
@@ -226,6 +306,10 @@ function getConnectionString($dbName = 'comedor') {
             return env('DB_ALQUIMISTA_SERVER') . ' -> ' . env('DB_ALQUIMISTA_DATABASE');
         case 'basenueva':
             return env('DB_BASENUEVA_SERVER') . ' -> ' . env('DB_BASENUEVA_DATABASE');
+        case 'kpi':
+            return env('DB_KPI_SERVER') . ' -> ' . env('DB_KPI_DATABASE');
+        case 'ticket':
+            return env('DB_TICKET_SERVER') . ' -> ' . env('DB_TICKET_DATABASE');
         case 'comedor':
         default:
             return env('DB_COMEDOR_SERVER') . ' -> ' . env('DB_COMEDOR_DATABASE');

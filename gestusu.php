@@ -3,14 +3,7 @@
 require_once __DIR__ . '/config/database.php';
 
 // Configuración de conexión a SQL Server
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
+$dbConfig = getComedorConfig(); $serverName = $dbConfig['serverName']; $connectionOptions = $dbConfig['connectionOptions'];
 
 // Inicializar variables
 $mensaje = '';

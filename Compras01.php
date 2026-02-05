@@ -157,11 +157,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
 ////////////////// Insert
 // $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02","CharacterSet" => "UTF-8");
+// $dbConfig = getComedorConfig(); $connectionInfo = $dbConfig['connectionOptions'];
 // $conn = sqlsrv_connect( $serverName, $connectionInfo);
 
 $serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
+$dbConfig = getComedorConfig(); $connectionInfo = $dbConfig['connectionOptions'];
 $conn = sqlsrv_connect( $serverName, $connectionInfo);
 
 // if( $conn ) {
@@ -186,7 +186,7 @@ sqlsrv_free_stmt( $stmt);
 ////////////////// Select
 
 // $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02");
+// $dbConfig = getComedorConfig(); $connectionInfo = $dbConfig['connectionOptions'];
 // $conn = sqlsrv_connect( $serverName, $connectionInfo);
 
 // if( $conn ) {

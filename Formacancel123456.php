@@ -11,14 +11,7 @@ setlocale(LC_ALL, 'es_ES.UTF-8', 'spanish');
 date_default_timezone_set('America/Mexico_City');
 
 // Conexión a SQL Server
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionInfo = array(
-    "Database" => "Comedor",
-    "UID" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "ReturnDatesAsStrings" => true
-);
+$dbConfig = getComedorConfig(); $serverName = $dbConfig['serverName']; $connectionOptions = $dbConfig['connectionOptions'];
 
 $conn = sqlsrv_connect($serverName, $connectionInfo);
 if (!$conn) {
