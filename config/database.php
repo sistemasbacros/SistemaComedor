@@ -108,7 +108,9 @@ function getComedorConfig() {
             "Database" => env('DB_COMEDOR_DATABASE', 'Comedor'),
             "Uid" => env('DB_COMEDOR_USERNAME', 'Larome03'),
             "PWD" => env('DB_COMEDOR_PASSWORD', 'Larome03'),
-            "CharacterSet" => env('DB_COMEDOR_CHARSET', 'UTF-8')
+            "CharacterSet" => env('DB_COMEDOR_CHARSET', 'UTF-8'),
+            "TrustServerCertificate" => true,
+            "Encrypt" => false
         )
     ];
 }
