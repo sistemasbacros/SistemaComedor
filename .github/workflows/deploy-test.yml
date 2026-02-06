@@ -273,7 +273,7 @@ jobs:
           }
 
           # Leer puerto del .env para informar
-          $port = 8080
+          $port = 8082
           if (Test-Path "$env:DEPLOY_PATH\.env") {
             $envContent = Get-Content "$env:DEPLOY_PATH\.env"
             foreach ($line in $envContent) {
@@ -334,7 +334,7 @@ jobs:
           
           # Leer el puerto del archivo .env
           $envContent = Get-Content "$env:DEPLOY_PATH\.env"
-          $port = 8080
+          $port = 8082
           foreach ($line in $envContent) {
             if ($line -match "HTTP_PORT_TEST=(\d+)") {
               $port = $matches[1]
