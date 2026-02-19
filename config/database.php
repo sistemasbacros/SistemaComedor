@@ -113,11 +113,11 @@ function getAlquimistaConnection()
  */
 function getBaseNuevaConnection()
 {
-    $server = getenv('DB_BASENEW_SERVER');
+    $server = getenv('DB_BASENUEVA_SERVER');
     $info = [
-        'Database'               => getenv('DB_BASENEW_DATABASE'),
-        'UID'                    => getenv('DB_BASENEW_USERNAME'),
-        'PWD'                    => getenv('DB_BASENEW_PASSWORD'),
+        'Database'               => getenv('DB_BASENUEVA_DATABASE'),
+        'UID'                    => getenv('DB_BASENUEVA_USERNAME'),
+        'PWD'                    => getenv('DB_BASENUEVA_PASSWORD'),
         'CharacterSet'           => 'UTF-8',
         'TrustServerCertificate' => true,
     ];
