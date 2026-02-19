@@ -8,7 +8,7 @@ $user_id = $_SESSION['user_id'] ?? '';
 
 // Si no hay sesión activa, redirigir al login
 if (empty($user_name)) {
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: Admiin.php");
     exit;
 }
 
@@ -351,7 +351,7 @@ $show_debug = isset($_GET['debug']) && $_GET['debug'] == '1';
             <a href="http://192.168.100.95/Comedor" class="nav-link">
                 <i class="fas fa-home"></i> Menú principal
             </a>
-            <a href="http://desarollo-bacros/Comedor/FormatCancel.php" class="nav-link">
+            <a href="FormatCancel.php" class="nav-link">
                 <i class="fas fa-calendar-times"></i> Cancelaciones
             </a>
            

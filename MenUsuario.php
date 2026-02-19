@@ -38,7 +38,7 @@ if (!$isAuthenticated) {
     setcookie(session_name(), '', time()-3600, '/');
     
     // Redirigir al login
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: Admiin.php");
     exit;
 }
 
@@ -48,7 +48,7 @@ if (isset($_SESSION['LOGIN_TIME']) && (time() - $_SESSION['LOGIN_TIME'] > $sessi
     session_unset();
     session_destroy();
     setcookie(session_name(), '', time()-3600, '/');
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: Admiin.php");
     exit;
 }
 
@@ -723,7 +723,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                 </a>
             </li>
             <li class="nav-item mt-auto">
-                <a class="nav-link text-danger" href="http://desarollo-bacros/Comedor/admicome4.php?logout=true" id="logoutBtn">
+                <a class="nav-link text-danger" href="admicome4.php?logout=true" id="logoutBtn">
                     <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
                 </a>
             </li>
@@ -800,7 +800,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     <?php else: ?>
                         <!-- Contenedor del iframe (solo si no está bloqueado) -->
                         <div class="report-iframe-container">
-                            <iframe src="http://desarollo-bacros/Comedor/Menpedidos1.php" 
+                            <iframe src="Menpedidos1.php" 
                                     class="report-iframe" 
                                     id="pedidos-iframe"
                                     onload="hideLoading('pedidos-loading')">
@@ -833,7 +833,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     
                     <!-- Contenedor del iframe -->
                     <div class="report-iframe-container">
-                        <iframe src="http://desarollo-bacros/Comedor/AgendaPedidos1.php" 
+                        <iframe src="AgendaPedidos1.php" 
                                 class="report-iframe" 
                                 id="consulta-iframe"
                                 onload="hideLoading('consulta-loading')">
@@ -865,7 +865,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     
                     <!-- Contenedor del iframe -->
                     <div class="report-iframe-container">
-                        <iframe src="http://desarollo-bacros/Comedor/descUsuario.php" 
+                        <iframe src="descUsuario.php" 
                                 class="report-iframe" 
                                 id="reporte-iframe"
                                 onload="hideLoading('reporte-loading')">
@@ -897,7 +897,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     
                     <!-- Contenedor del iframe con fallback mejorado -->
                     <div class="report-iframe-container">
-                        <iframe src="http://desarollo-bacros/Comedor/GenerarQR1.php" 
+                        <iframe src="GenerarQR1.php" 
                                 class="report-iframe" 
                                 id="qr-iframe"
                                 onload="hideLoading('qr-loading')">

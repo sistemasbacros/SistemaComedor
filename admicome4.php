@@ -36,17 +36,17 @@ if (isset($_GET['logout']) && $_GET['logout'] === 'true') {
     }
     
     // Redirigir inmediatamente al login
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: Admiin.php");
     exit;
 }
 
 // Verificación estricta de autenticación - CORREGIDO
 $isAuthenticated = (
-    isset($_SESSION['authenticated_from_login']) && 
+    isset($_SESSION['authenticated_from_login']) &&
     $_SESSION['authenticated_from_login'] === true &&
-    isset($_SESSION['session_id']) && 
+    isset($_SESSION['session_id']) &&
     $_SESSION['session_id'] === session_id() &&
-    isset($_SESSION['browser_fingerprint']) && 
+    isset($_SESSION['browser_fingerprint']) &&
     $_SESSION['browser_fingerprint'] === md5($_SERVER['HTTP_USER_AGENT'] . $_SERVER['REMOTE_ADDR'])
 );
 
@@ -56,9 +56,9 @@ if (!$isAuthenticated) {
     session_unset();
     session_destroy();
     setcookie(session_name(), '', time()-3600, '/');
-    
+
     // Redirigir al login
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: Admiin.php");
     exit;
 }
 
@@ -68,7 +68,7 @@ if (isset($_SESSION['LOGIN_TIME']) && (time() - $_SESSION['LOGIN_TIME'] > $sessi
     session_unset();
     session_destroy();
     setcookie(session_name(), '', time()-3600, '/');
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: Admiin.php");
     exit;
 }
 
@@ -2602,7 +2602,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
             <?php endif; ?>
             
             <li class="nav-item mt-auto">
-                <a class="nav-link text-danger" href="http://desarollo-bacros/Comedor/admicome4.php?logout=true" id="logoutBtn">
+                <a class="nav-link text-danger" href="admicome4.php?logout=true" id="logoutBtn">
                     <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
                 </a>
             </li>
@@ -3602,7 +3602,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
                     <div id="usuarios-loading" class="loading-overlay"><div class="loading-spinner"></div><div class="loading-text">Cargando sistema de gestión de usuarios...</div></div>
                     <div class="report-iframe-container">
 
-                        <iframe src="http://desarollo-bacros/Comedor/gestusu.php" class="report-iframe" id="usuarios-iframe" onload="document.getElementById('usuarios-loading').style.display='none';"></iframe>
+                        <iframe src="gestusu.php" class="report-iframe" id="usuarios-iframe" onload="document.getElementById('usuarios-loading').style.display='none';"></iframe>
                     </div>
                 </div>
             </div>
@@ -3619,7 +3619,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
                 <div class="card-body p-0 position-relative">
                     <div id="reportes-loading" class="loading-overlay"><div class="loading-spinner"></div><div class="loading-text">Cargando sistema de reportes...</div></div>
                     <div class="report-iframe-container">
-                        <iframe src="http://desarollo-bacros/Comedor/dem1.php" class="report-iframe" id="report-iframe" onload="document.getElementById('reportes-loading').style.display='none';"></iframe>
+                        <iframe src="dem1.php" class="report-iframe" id="report-iframe" onload="document.getElementById('reportes-loading').style.display='none';"></iframe>
                     </div>
                 </div>
             </div>
@@ -3636,7 +3636,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
                 <div class="card-body p-0 position-relative">
                     <div id="menus-loading" class="loading-overlay"><div class="loading-spinner"></div><div class="loading-text">Cargando sistema de gestión de menús...</div></div>
                     <div class="menu-iframe-container">
-                        <iframe src="http://desarollo-bacros/Comedor/menu1.php" class="menu-iframe" id="menu-iframe" onload="document.getElementById('menus-loading').style.display='none';"></iframe>
+                        <iframe src="menu1.php" class="menu-iframe" id="menu-iframe" onload="document.getElementById('menus-loading').style.display='none';"></iframe>
                     </div>
                 </div>
             </div>
