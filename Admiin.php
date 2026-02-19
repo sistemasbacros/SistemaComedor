@@ -78,11 +78,11 @@
 // Configuración de sesión mejorada
 session_set_cookie_params([
     'lifetime' => 0,
-    'path' => '/Comedor/',
+    'path' => '/',  // Cambiado a raíz para compatibilidad con Docker
     'domain' => '',
     'secure' => false,
     'httponly' => true,
-    'samesite' => 'Lax' // Cambiado de 'Strict' a 'Lax' para mejor compatibilidad
+    'samesite' => 'Lax'
 ]);
 
 // Control de cache más agresivo
@@ -156,7 +156,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['usuario']) && isset($
                     $_SESSION['authenticated_from_login'] = true;
                     $_SESSION['session_id'] = session_id();
                     $_SESSION['browser_fingerprint'] = md5($_SERVER['HTTP_USER_AGENT'] . $_SERVER['REMOTE_ADDR']);
-                    // Eliminado: $_SESSION['one_time_access'] = true; (causaba problemas)
+                    
+                    // DEBUG: Verificar que la sesión se guardó
+                    error_log("=== DEBUG Admiin.php - Sesión creada ===");
+                    error_log("Session ID después de regenerate: " . session_id());
+                    error_log("user_name guardado: " . $_SESSION['user_name']);
+                    error_log("authenticated_from_login: " . ($_SESSION['authenticated_from_login'] ? 'true' : 'false'));
+                    error_log("browser_fingerprint: " . $_SESSION['browser_fingerprint']);
                     
                     $loginSuccess = true;
                     $userArea = $row['Area'];
@@ -208,6 +214,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['usuario']) && isset($
                     } else {
                         // Para otras áreas, redirigir directamente a MenUsuario.php
                         error_log("Redirigiendo a MenUsuario.php para: " . $userArea);
+                        
+                        // IMPORTANTE: Forzar escritura de sesión antes de redirigir
+                        session_write_close();
+                        
                         header("Location: MenUsuario.php");
                         exit;
                     }

@@ -6,11 +6,11 @@
 // Configuración de sesión
 session_set_cookie_params([
     'lifetime' => 0,
-    'path' => '/Comedor/',
+    'path' => '/',  // Cambiado a raíz para compatibilidad con Docker
     'domain' => '',
     'secure' => false,
     'httponly' => true,
-    'samesite' => 'Strict'
+    'samesite' => 'Lax'  // Cambiado de Strict a Lax para mejor compatibilidad
 ]);
 
 // Configuración de seguridad
@@ -19,6 +19,15 @@ header("Pragma: no-cache");
 header("Expires: 0");
 
 session_start();
+
+// DEBUG: Ver estado de sesión
+error_log("=== DEBUG MenUsuario.php ===");
+error_log("Session ID actual: " . session_id());
+error_log("Session ID guardado: " . ($_SESSION['session_id'] ?? 'NO EXISTE'));
+error_log("authenticated_from_login: " . (isset($_SESSION['authenticated_from_login']) ? ($_SESSION['authenticated_from_login'] ? 'true' : 'false') : 'NO EXISTE'));
+error_log("browser_fingerprint guardado: " . ($_SESSION['browser_fingerprint'] ?? 'NO EXISTE'));
+error_log("browser_fingerprint actual: " . md5($_SERVER['HTTP_USER_AGENT'] . $_SERVER['REMOTE_ADDR']));
+error_log("user_name: " . ($_SESSION['user_name'] ?? 'NO EXISTE'));
 
 // Verificación estricta de autenticación - CORREGIDO
 $isAuthenticated = (
@@ -30,8 +39,11 @@ $isAuthenticated = (
     $_SESSION['browser_fingerprint'] === md5($_SERVER['HTTP_USER_AGENT'] . $_SERVER['REMOTE_ADDR'])
 );
 
+error_log("isAuthenticated: " . ($isAuthenticated ? 'SI' : 'NO'));
+
 // Permitir acceso durante el mismo request después de procesar POST
 if (!$isAuthenticated) {
+    error_log("FALLÓ AUTENTICACIÓN - Redirigiendo a Admiin.php");
     // Destruir completamente la sesión
     session_unset();
     session_destroy();
@@ -42,8 +54,8 @@ if (!$isAuthenticated) {
     exit;
 }
 
-// Verificar expiración de sesión (2 minutos - muy corto)
-$sessionTimeout = 2 * 60; // 2 minutos
+// Verificar expiración de sesión (30 minutos)
+$sessionTimeout = 30 * 60; // 30 minutos
 if (isset($_SESSION['LOGIN_TIME']) && (time() - $_SESSION['LOGIN_TIME'] > $sessionTimeout)) {
     session_unset();
     session_destroy();
