@@ -1,8 +1,82 @@
+<!--
+ @file Consultadedatos.php
+ @brief Dashboard analítico de pedidos del comedor con visualizaciones múltiples y tabla exportable.
+
+ @description
+ Módulo de consulta y análisis de datos del Sistema Comedor. Permite al usuario seleccionar
+ un día, mes y año para obtener métricas y gráficos interactivos sobre los pedidos realizados
+ en esa semana. El flujo es:
+   1. El usuario selecciona Día, Mes y Año mediante selectores HTML.
+   2. Al presionar "Consultar" se ejecuta ConsultGraf(), que filtra los arrays PHP (pasados
+      como JSON al JS) y construye las series de datos para cuatro gráficos ECharts.
+   3. Simultáneamente, Borrar() limpia la DataTable antes de agregar nuevas filas.
+   4. La DataTable #example muestra Área, Fecha, Total de Platillos servidos y costo
+      estimado (platillos × $30 MXN).
+   5. Los gráficos generados son:
+      a) Gráfico de barras agrupadas por área y día (#container) — pedidos por área/día de la semana.
+      b) Gráfico de pastel por área (#main) — participación proporcional de cada área.
+      c) Gráfico de barras horizontales apiladas por categoría de gasto semanal (#main1).
+      d) Gráfico de pastel "donut" mensual (#main2) — total de platillos servidos por mes del año.
+
+ Fuentes de datos PHP → SQL Server:
+   - $sql  : Consulta PIVOT que transpone pedidos diarios por área (PedidosComida + Catalogo_EmpArea).
+   - $sql1 : Totales mensuales de pedidos (PedidosComida agrupada por año-mes).
+   - $sql4 : Costos de compras por semana del mes (Compras_Costos con cálculo de número de semana).
+
+ @module Módulo de Reportes y KPIs
+ @access DIRECCIÓN | RECURSOS HUMANOS | ADMINISTRADOR
+
+ @dependencies
+ - JS CDN: jQuery 3.5.1, DataTables 1.13.4, ECharts 5.4.2
+ - PHP: sqlsrv (extensión Microsoft SQL Server)
+
+ @database
+ - Base de datos: Comedor (DESAROLLO-BACRO\SQLEXPRESS)
+ - Tablas:
+     * [dbo].[PedidosComida]       — Pedidos de comida por empleado y semana (columnas: Lunes–Viernes)
+     * [dbo].[Catalogo_EmpArea]    — Catálogo de empleados con área asignada
+     * [dbo].[Compras_Costos]      — Registro de costos de compras por categoría y fecha
+ - Patrones SQL: PIVOT, UNION ALL, GROUP BY, DATEADD, ISNULL, datepart(week,...), substring
+
+ @analytics
+ - Tipo de visualización:
+     * Gráfico de barras agrupadas (pedidos por área y día)
+     * Gráfico de pastel (distribución por área en la semana seleccionada)
+     * Gráfico de barras horizontales apiladas (costos de compras por semana y categoría)
+     * Gráfico de pastel donut (total de platillos servidos por mes en el año)
+ - Métricas calculadas:
+     * Pedidos por área por día de la semana (Lunes–Viernes)
+     * Total de platillos servidos por área en la semana
+     * Costo estimado por área (platillos × $30 MXN)
+     * Totales mensuales de pedidos acumulados por año
+     * Costos de compras (Carnicería, Frutas, Verduras, Lácteos, Accesorios) por semana
+ - Período de análisis: Semana específica según selección Día-Mes-Año; totales mensuales del año
+
+ @inputs
+ - Filtros UI: Selector Mes (01–12), Selector Día (01–31), Selector Año (2023–2030)
+ - Botón: "Consultar" → dispara Borrar() + ConsultGraf()
+ - $_POST campos: Mes, Semana (día), Anio
+
+ @outputs
+ - DataTable con columnas: Área, Fecha, Total_Platillos, Total (costo estimado MXN)
+ - Cuatro gráficos ECharts interactivos con tooltips y leyendas
+ - Herramienta de guardado como imagen en gráfico de barras (ECharts toolbox)
+
+ @security
+ - Formulario POST con action sobre sí mismo
+ - Función test_input() para sanitización: trim, stripslashes, htmlspecialchars
+ - NOTA: Credenciales de base de datos hardcodeadas (pendiente migrar a .env)
+
+ @author Equipo Tecnología BacroCorp
+ @version 1.0
+ @since 2024
+ @updated 2026-02-18
+-->
 <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
 <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css"></script>
 
-<form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>"> 
+<form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>">
 <!DOCTYPE html>
 <html>
 <head>
@@ -144,15 +218,43 @@ $mes = test_input($_POST["Mes"]);
 
 ////////////////// Select
 
-// $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02","CharacterSet" => "UTF-8");
-// $conn = sqlsrv_connect( $serverName, $connectionInfo);
-
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
 
+/* =========================================================
+ * CONSULTA ANALÍTICA: Pedidos por Área y Día de la Semana mediante PIVOT
+ * =========================================================
+ * Patrón SQL: PIVOT + UNION ALL + INNER JOIN + GROUP BY + DATEADD + ISNULL
+ * Bases de datos: Comedor
+ * Tablas: [dbo].[PedidosComida], [dbo].[Catalogo_EmpArea]
+ * Descripción:
+ *   Genera una tabla desnormalizada con el total de pedidos por área y día de la semana.
+ *   El flujo interno de la consulta es:
+ *     1. UNION ALL (capa interna): Descompone las columnas Lunes–Viernes de PedidosComida
+ *        en filas individuales, calculando para cada día la fecha real via DATEADD (+0 a +4 días
+ *        desde la fecha de inicio de semana). Genera una clave compuesta Clave_Uni = inicial
+ *        del tipo de platillo + nombre del día (ej. 'CLunes', 'DViernes').
+ *     2. PIVOT: Transpone las filas de días en columnas binarias/conteo usando la clave Clave_Uni.
+ *        Columnas resultantes del PIVOT: CLunes, DLunes, CMartes, DMartes, CMiercoles, DMiercoles,
+ *        CJueves, DJueves, CViernes, DViernes.
+ *     3. INNER JOIN con Catalogo_EmpArea: Agrega el campo Area al empleado.
+ *     4. GROUP BY Area, Fecha: Agrega los totales por área y semana (fecha de inicio de semana).
+ * Columnas retornadas:
+ *   - Area       : Nombre del área del empleado
+ *   - Fecha      : Fecha de inicio de la semana (formato del campo en PedidosComida)
+ *   - CLunes     : Total de platillos tipo C pedidos el lunes
+ *   - DLunes     : Total de platillos tipo D pedidos el lunes
+ *   - CMartes    : Total de platillos tipo C pedidos el martes
+ *   - DMartes    : Total de platillos tipo D pedidos el martes
+ *   - CMiercoles : Total de platillos tipo C pedidos el miércoles
+ *   - DMiercoles : Total de platillos tipo D pedidos el miércoles
+ *   - CJueves    : Total de platillos tipo C pedidos el jueves
+ *   - DJueves    : Total de platillos tipo D pedidos el jueves
+ *   - CViernes   : Total de platillos tipo C pedidos el viernes
+ *   - DViernes   : Total de platillos tipo D pedidos el viernes
+ * =========================================================
+ */
 $sql = "Select * from (
 Select Area,Fecha,sum(CLunes) as CLunes,sum(DLunes) AS DLunes,sum(CMartes) as CMartes,sum(DMartes) as DMartes,sum(CMiercoles) as CMiercoles,
 sum(DMiercoles) as DMiercoles,sum(CJueves) as CJueves,sum(DJueves) as DJueves,sum(CViernes) as CViernes,sum(DViernes) as DViernes from (
@@ -208,6 +310,23 @@ Group by Area,Fecha) as v";
 //////////////////////////////////////////////////////// Declarar Querys
 
 /////////////////////////////////////////////////////////////////////////////Query gráfica mensual
+/* =========================================================
+ * CONSULTA ANALÍTICA: Totales Mensuales de Pedidos del Año
+ * =========================================================
+ * Patrón SQL: GROUP BY + CASE WHEN + SUM + left(Fecha,7)
+ * Bases de datos: Comedor
+ * Tablas: [dbo].[PedidosComida]
+ * Descripción:
+ *   Calcula el total de platillos pedidos por mes en el año filtrado. Para cada fila
+ *   de PedidosComida, convierte cada columna de día (Lunes–Viernes) en un valor binario
+ *   (1 si hay pedido, 0 si está vacío) usando CASE WHEN. Luego suma esos valores binarios
+ *   por mes agrupando por los primeros 7 caracteres de la fecha (formato YYYY-MM).
+ *   Esto permite mostrar la distribución anual de pedidos en el gráfico de pastel donut.
+ * Columnas retornadas:
+ *   - Fecha : Año-Mes en formato YYYY-MM (primeros 7 caracteres del campo Fecha)
+ *   - Total : Suma total de platillos pedidos en ese mes (conteo de días con pedido)
+ * =========================================================
+ */
 $sql1 = "Select * from (
 Select left(Fecha,7) as Fecha, Sum(LunesB) + Sum(MartesB) +
  Sum(MiercolesB) + Sum(JuevesB) + Sum(ViernesB)  as Total
@@ -222,7 +341,29 @@ Group by left(Fecha,7)) AS A";
 
 /////////////////////////////////////////////////////////////////////////////Query gráfica mensual
 
-$sql4 = "Select * from (Select *, 
+/* =========================================================
+ * CONSULTA ANALÍTICA: Costos de Compras por Semana del Mes
+ * =========================================================
+ * Patrón SQL: datepart(week,...), CONVERT(date,fecha,103), DATEADD, substring, right, left
+ * Bases de datos: Comedor
+ * Tablas: [dbo].[Compras_Costos]
+ * Descripción:
+ *   Enriquece los registros de la tabla Compras_Costos con el número de semana dentro
+ *   del mes (Id_Semana = 0..4). El cálculo usa la diferencia entre el número de semana
+ *   del año del día actual y el número de semana del primer día del mes.
+ *   También extrae componentes de fecha: día (primeros 2 chars), mes (chars 4-5) y año
+ *   (últimos 4 chars) asumiendo el formato DD-MM-YYYY. Esta consulta alimenta el gráfico
+ *   de barras horizontales apiladas de costos por categoría y semana.
+ * Columnas retornadas:
+ *   - (todas las columnas originales de Compras_Costos, más:)
+ *   - Id_Semana : Número de semana dentro del mes (0-based, ej. 0=primera semana)
+ *   - dia       : Día del mes extraído (2 caracteres de la izquierda)
+ *   - mes       : Mes extraído (posición 4-5 de la cadena)
+ *   - anio      : Año extraído (últimos 4 caracteres)
+ *   - (columnas de categorías asumidas): Carnes, Frutas, Verduras, Lacteos, Accesorios
+ * =========================================================
+ */
+$sql4 = "Select * from (Select *,
 Id_Semana=datepart(week,CONVERT(date,fecha,103))
 - datepart(week, dateadd(dd,-day(CONVERT(date,fecha,103))+1,CONVERT(date,fecha,103))), left(fecha,2) as dia,
 substring(fecha,4,2) as mes, right(fecha,4) as anio
@@ -329,6 +470,17 @@ array_push($array_int12,$row['DViernes']);
 sqlsrv_free_stmt( $stmt);
 
 
+/**
+ * Sanitiza y limpia una entrada de formulario.
+ *
+ * Aplica tres transformaciones secuenciales:
+ *   1. trim()             — Elimina espacios al inicio y al final.
+ *   2. stripslashes()     — Elimina barras invertidas (protección contra magic quotes).
+ *   3. htmlspecialchars() — Convierte caracteres especiales HTML a entidades (prevención XSS).
+ *
+ * @param string $data Cadena de texto proveniente de un campo de formulario.
+ * @return string Cadena sanitizada lista para uso seguro.
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);
@@ -380,6 +532,28 @@ var dataG12 = <?php echo json_encode($array_int12);?>;
  var  dGM2 = <?php echo json_encode($array_grafM2);?>;
 
 //////////////////////////////////////////////////// Function consultas gráficas
+/**
+ * @function ConsultGraf
+ * @description Función principal de visualización. Ejecutada al presionar "Consultar",
+ *   lee los selectores Día (x), Mes (x1) y Año (x2) del formulario HTML y filtra los
+ *   arrays de datos PHP (pasados como JSON) para el período seleccionado. Luego:
+ *   1. Filtra datagastd (costos de compras) por mes, año y número de semana (1–4),
+ *      construyendo arrays de costos por categoría (Carnicería, Frutas, Verduras, Lácteos,
+ *      Accesorios) para las 4 semanas del mes y un array de totales semanales.
+ *   2. Filtra dGM (totales mensuales) por año y distribuye en 12 variables GM1–GM12
+ *      (una por mes) para el gráfico de pastel donut mensual.
+ *   3. Filtra dataG (pedidos por área y día) comparando la fecha construida (YYYY-MM-DD)
+ *      e itera sobre áreas predefinidas (Administración, Licitaciones, Talento humano,
+ *      Gestión de proyectos, Finanzas y Contabilidad, C.A. de Bacrocorp, Operaciones,
+ *      Asistente de dirección) para construir los arrays por área con totales Lunes–Viernes.
+ *   4. Agrega filas a la DataTable #example con: Área, Fecha, Total platillos, costo ($30/platillo).
+ *   5. Renderiza cuatro gráficos ECharts:
+ *      - #main1   : Barras horizontales apiladas (costos de compras por semana y categoría)
+ *      - #main2   : Pastel donut (platillos servidos por mes en el año seleccionado)
+ *      - #main    : Pastel (participación de cada área en la semana seleccionada)
+ *      - #container: Barras agrupadas por área y día (Lunes–Viernes)
+ * @returns {void}
+ */
 function ConsultGraf() {
 	
 	////////////////////////////////// Variables html
@@ -1612,9 +1786,16 @@ option && myChart.setOption(option);
 
 
 
+/**
+ * @function Borrar
+ * @description Limpia todas las filas de la DataTable #example antes de cargar nuevos
+ *   resultados de consulta. Invocada junto con ConsultGraf() al presionar "Consultar",
+ *   evita la acumulación de datos de consultas anteriores en la tabla.
+ * @returns {void}
+ */
 function Borrar() {
 var table = $('#example').DataTable();
- 
+
 table.clear()
 }
 var dataSet = [];

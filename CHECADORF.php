@@ -1,3 +1,4 @@
+<?php require_once __DIR__ . '/config/database.php'; ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -697,9 +698,7 @@
     $firstday = date('Y-m-d', strtotime("this week"));
     
     // Conexión a base de datos
-    $serverName = "DESAROLLO-BACRO\SQLEXPRESS";
-    $connectionInfo = array("Database" => "Comedor", "UID" => "Larome03", "PWD" => "Larome03", "CharacterSet" => "UTF-8");
-    $conn = sqlsrv_connect($serverName, $connectionInfo);
+    $conn = getComedorConnection();
     
     // Consulta para totales actuales
     $sql250 = "Select Hora_Entrada,Tipo_Comida,Count(*) as Total from (

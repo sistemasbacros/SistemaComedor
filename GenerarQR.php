@@ -1,3 +1,85 @@
+<!--
+ @file GenerarQR.php
+ @brief Módulo de generación de códigos QR personales para check-in en comedor.
+
+ @description
+ Permite a los empleados de BacroCorp generar su código QR personal para
+ registrar su asistencia al servicio de comedor. El usuario selecciona los
+ parámetros de su consumo (fecha, tipo de comida, nombre y credenciales) y
+ el sistema valida contra los datos precargados desde la base de datos para
+ generar el QR únicamente si existe un pedido registrado para esa combinación.
+ La generación del código QR es completamente del lado del cliente mediante
+ la librería QRious.js; no se realiza ninguna petición al servidor en el momento
+ de la generación. El QR codifica: nombre del empleado, tipo de comida y fecha.
+ El código generado puede descargarse como imagen PNG.
+
+ @module Módulo de Códigos QR
+ @access Empleados con credenciales válidas registradas en PedidosComida
+
+ @dependencies
+   PHP:
+   - sqlsrv (extensión MSSQL para PHP)
+   - config/database.php (NO utilizado — conexión hardcodeada, pendiente de migrar)
+   JavaScript CDN:
+   - jQuery 3.5.1 (https://code.jquery.com/jquery-3.5.1.js)
+   - DataTables 1.13.4 (https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js)
+   - ECharts 5.4.2 (https://fastly.jsdelivr.net/npm/echarts@5.4.2/dist/echarts.min.js)
+   - QRious 4.0.2 (https://unpkg.com/qrious@4.0.2/dist/qrious.js)
+   - XLSX 0.15.1 (https://unpkg.com/xlsx@0.15.1/dist/xlsx.full.min.js)
+   - Font Awesome 4.7.0 (https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css)
+
+ @database
+   Servidor: DESAROLLO-BACRO\SQLEXPRESS (hardcodeado — pendiente migrar a .env)
+   Base de datos: Comedor
+   Tablas:
+   - [dbo].[PedidosComida]   — Pedidos semanales por empleado (Lunes a Viernes)
+   - [dbo].[Catalogo_EmpArea] — Catálogo de empleados y áreas
+   Operaciones: SELECT (consulta de pedidos usando UNION ALL por día de semana)
+
+ @session
+   Variables: No utiliza variables de sesión PHP (autenticación local en JS)
+
+ @workflow
+   1. PHP ejecuta al cargar la página: consulta todos los pedidos activos
+      de la semana con credenciales y los serializa como arrays PHP.
+   2. Los arrays PHP se pasan a JavaScript mediante json_encode().
+   3. El usuario selecciona Mes, Día, Año, Tipo de comida e ingresa
+      su Nombre completo, Usuario y Contraseña en el formulario HTML.
+   4. Al presionar "Aceptar", la función generar() busca en los arrays
+      JS una coincidencia exacta de fecha, nombre, tipo de comida y credenciales.
+   5. Si hay coincidencia, QRious genera el código QR en el elemento <img>.
+   6. Si no hay coincidencia, muestra una alerta de error al usuario.
+   7. El botón "Descargar" permite guardar el QR como archivo Demo.png.
+
+ @inputs
+   HTML Form (client-side):
+   - #Mes      (select) — Mes del consumo (01–12)
+   - #Semana   (select) — Día del mes (01–31)
+   - #Anio     (select) — Año del consumo (2023–2030)
+   - #Comida   (select) — Tipo de consumo: Desayuno | Comida
+   - #fname    (text)   — Nombre completo del empleado
+   - #Usuar    (text)   — Usuario del empleado
+   - #contrase (password) — Contraseña del empleado
+
+ @outputs
+   Imagen QR generada en canvas mediante QRious.js (formato PNG descargable).
+   Formato del texto codificado en el QR:
+   "[Nombre] se encuentra registrado para el [TipoComida] con fecha de [YYYY-MM-DD]"
+
+ @security
+   - La validación de credenciales se realiza del lado del cliente comparando
+     contra arrays JS inyectados desde PHP (esquema de seguridad débil —
+     las credenciales quedan expuestas en el HTML renderizado).
+   - La función test_input() aplica trim, stripslashes y htmlspecialchars.
+   - ADVERTENCIA: La conexión a BD usa credenciales hardcodeadas. Pendiente
+     migrar a variables de entorno usando config/database.php.
+   - No hay verificación de sesión activa en este módulo.
+
+ @author Equipo Tecnología BacroCorp
+ @version 1.0
+ @since 2024
+ @updated 2026-02-18
+-->
 <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
 <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css"></script>
@@ -127,7 +209,7 @@ body {
 	
   <button onclick="generar();">Aceptar</button>
   <br>	
-   <a href="http://192.168.100.95/Comedor/GenerarQRNuevoRegistro.php">Registrarse</a>.
+   <a href="GenerarQRNuevoRegistro.php">Registrarse</a>.
   <br>
 <div style="height:70%;width:70%;float: left;">
 	<img alt="Código QR" id="codigo">
@@ -138,15 +220,41 @@ body {
 </body>
 </html>
 <?php
+/**
+ * @section Procesamiento del servidor — Precarga de pedidos para validación cliente
+ * @brief Consulta todos los pedidos registrados en PedidosComida y los exporta
+ *        como variables JavaScript para que la función generar() pueda validar
+ *        credenciales y existencia de pedido completamente del lado del cliente.
+ *
+ * @details
+ * La consulta principal aplica UNION ALL sobre las columnas de días de la semana
+ * (Lunes, Martes, Miércoles, Jueves, Viernes) para transponer la estructura semanal
+ * de PedidosComida a filas individuales por día. Se hace LEFT JOIN con Catalogo_EmpArea
+ * para obtener datos adicionales del empleado.
+ *
+ * Los resultados se almacenan en 8 arrays paralelos indexados:
+ * - $array_Camp1 → Id_Empleado
+ * - $array_Camp2 → Nombre
+ * - $array_Camp3 → Fecha (semana del pedido)
+ * - $array_Camp4 → fecha_dia (fecha exacta del consumo día a día)
+ * - $array_Camp5 → descripcion (tipo/nombre de platillo)
+ * - $array_Camp6 → Total (conteo de registros)
+ * - $array_Camp7 → Usuario (credencial de acceso)
+ * - $array_Camp8 → Contrasena (contraseña del empleado)
+ *
+ * @uses getComedorConnection() Conexión centralizada desde config/database.php.
+ * @warning Los datos de Usuario y Contrasena se envían al cliente en texto plano
+ *          dentro de variables JavaScript, lo que representa un riesgo de seguridad.
+ *
+ * @uses sqlsrv_connect()     Establece conexión con SQL Server
+ * @uses sqlsrv_query()       Ejecuta la consulta SQL
+ * @uses sqlsrv_fetch_array() Itera sobre el resultado fila por fila
+ * @uses sqlsrv_free_stmt()   Libera el statement de memoria
+ * @uses json_encode()        Serializa arrays PHP para inyección en JavaScript
+ */
 
-// $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02","CharacterSet" => "UTF-8");
-// $conn = sqlsrv_connect( $serverName, $connectionInfo);
-
-
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
 
 $sql = "Select t.Id_Empleado as Id,Nombre,Fecha,ltrim(rtrim(cast(fecha_dia as char) )) as fecha_dia,descripcion,Total,Usuario,Contrasena from (
@@ -219,6 +327,13 @@ array_push($array_Camp8,$row['Contrasena']);
 sqlsrv_free_stmt( $stmt);
 
 
+/**
+ * Sanitiza datos de entrada para prevenir inyecciones y caracteres maliciosos.
+ *
+ * @param  string $data Cadena de texto a sanitizar.
+ * @return string Cadena saneada sin espacios extremos, sin barras invertidas
+ *                y con caracteres especiales HTML escapados.
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);
@@ -229,6 +344,21 @@ function test_input($data) {
 ?>
 
 <script type="text/javascript">
+/**
+ * @section Variables JavaScript — Datos de pedidos inyectados desde PHP
+ * @description Arrays paralelos que contienen todos los pedidos de la semana
+ *              cargados desde la base de datos al momento de renderizar la página.
+ *              Cada índice `i` corresponde a un registro único de consumo por día.
+ *
+ * @var {Array<string>} datCamp1 - Id_Empleado de cada registro
+ * @var {Array<string>} datCamp2 - Nombre completo del empleado
+ * @var {Array<string>} datCamp3 - Fecha de la semana del pedido (fecha de registro)
+ * @var {Array<string>} datCamp4 - Fecha exacta del día de consumo (YYYY-MM-DD)
+ * @var {Array<string>} datCamp5 - Descripción del platillo (tipo de comida)
+ * @var {Array<number>} datCamp6 - Conteo total de registros agrupados
+ * @var {Array<string>} datCamp7 - Usuario de acceso del empleado
+ * @var {Array<string>} datCamp8 - Contraseña del empleado
+ */
 var datCamp1 = <?php echo json_encode($array_Camp1);?>;
 var datCamp2 = <?php echo json_encode($array_Camp2);?>;
 var datCamp3 = <?php echo json_encode($array_Camp3);?>;
@@ -242,6 +372,41 @@ var datCamp8 = <?php echo json_encode($array_Camp8);?>;
 	
 
 
+/**
+ * @function generar
+ * @description Valida los datos del formulario contra los pedidos cargados desde
+ *              la base de datos y genera el código QR del empleado si existe
+ *              una coincidencia exacta de fecha, nombre, tipo de comida y credenciales.
+ *
+ * @workflow
+ *   1. Lee los valores seleccionados: día (#Semana), mes (#Mes), año (#Anio),
+ *      tipo de comida (#Comida), nombre completo (#fname), usuario (#Usuar)
+ *      y contraseña (#contrase).
+ *   2. Construye la fecha en formato YYYY-MM-DD para comparación.
+ *   3. Itera sobre todos los registros en datCamp1..datCamp8.
+ *   4. Verifica que la fecha construida coincida con datCamp4[i], el nombre con
+ *      datCamp2[i] (quitando el sufijo " (Nombre del platillo)"), el tipo de
+ *      comida con datCamp5[i], el usuario con datCamp7[i] y la contraseña con
+ *      datCamp8[i].
+ *   5. Si hay coincidencia, instancia QRious en el elemento <img id="codigo">
+ *      con tamaño 350px, fondo transparente y color verde (#8bc34a).
+ *   6. Si ninguna iteración encontró coincidencia (textcod === undefined),
+ *      muestra un alert de error al usuario.
+ *   7. Configura el evento onclick del botón #btnDescargar para crear un
+ *      enlace dinámico que descarga el QR como Demo.png.
+ *
+ * @returns {void} No retorna valor. Modifica el DOM directamente:
+ *                 genera el QR en #codigo y configura el botón #btnDescargar.
+ *
+ * @sideEffects
+ *   - Modifica el atributo src del elemento <img id="codigo"> con el QR generado.
+ *   - Asocia un manejador onclick al botón <button id="btnDescargar">.
+ *   - Muestra alert() si no se encuentra el registro.
+ *
+ * @example
+ *   // Llamado desde el botón "Aceptar":
+ *   <button onclick="generar();">Aceptar</button>
+ */
 function generar() {
  
   var x = document.getElementById("Semana").value;	

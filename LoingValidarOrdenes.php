@@ -147,18 +147,17 @@
 </section>
 
 <?php
+require_once __DIR__ . '/config/database.php';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
 $name = test_input($_POST["email"]); /// Usuario
 $name1 = test_input($_POST["password"]); /// Contraseña
 
-///Conectar base de datos	
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+///Conectar base de datos
+$conn = getComedorConnection();
 
-///Conectar base de datos	
+///Conectar base de datos
 
 ////// Consulta a la base de datos.
 

@@ -1,18 +1,12 @@
 <?php
+require_once __DIR__ . '/config/database.php';
 $dat = [];
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $usuario = test_input($_POST["email"]);
     $contrasena = test_input($_POST["password"]);
 
-    $serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-    $connectionInfo = [
-        "Database" => "Comedor",
-        "UID" => "Larome03",
-        "PWD" => "Larome03",
-        "CharacterSet" => "UTF-8"
-    ];
-    $conn = sqlsrv_connect($serverName, $connectionInfo);
+    $conn = getComedorConnection();
 
     if (!$conn) {
         die("Error de conexión: " . print_r(sqlsrv_errors(), true));

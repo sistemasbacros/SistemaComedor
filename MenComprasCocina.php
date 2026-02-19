@@ -1,3 +1,79 @@
+<!--
+ @file MenComprasCocina.php
+ @brief Formulario semanal de lista de compras para cocina con exportación a Excel.
+
+ @description
+ Módulo de captura y gestión de la lista de compras semanal del área de Cocina.
+ Permite al usuario (Chef o responsable de cocina) ingresar artículos agrupados en
+ cinco categorías: Carnes, Frutas, Verduras, Lácteos y Accesorios. Cada categoría
+ acepta múltiples artículos separados por coma en un campo textarea.
+
+ Al hacer clic en "Agregar", la función JavaScript Prueba() divide los textos por comas
+ y añade filas a una tabla DataTables local (solo en el cliente, sin recargar la página).
+ El botón "Exporta tu tabla a excel" invoca ExportToExcel() usando la librería XLSX.js
+ para generar un archivo .xlsx descargable directamente desde el navegador.
+
+ Al hacer clic en "Pedir" (submit del formulario), los datos se envían via POST a PHP,
+ que los divide por comas y ejecuta un INSERT por cada artículo en la tabla
+ ListComprasCocina de SQL Server.
+
+ @module Módulo de Cocina
+ @access COCINA
+
+ @dependencies
+ - Librerías JS CDN:
+   - jQuery 3.5.1: manipulación DOM y DataTables
+   - DataTables 1.13.4 (JS + CSS): tabla interactiva de la lista de compras
+   - ECharts 5.4.2 (fastly.jsdelivr.net): incluido pero no utilizado en este módulo
+   - XLSX 0.15.1 (unpkg.com): exportación de tabla HTML a archivo Excel (.xlsx)
+   - Font Awesome 4.7.0: iconografía
+ - PHP: extensión sqlsrv (Microsoft SQL Server)
+ @note Este archivo NO utiliza config/database.php — gestiona su propia conexión
+       con credenciales hardcodeadas. Pendiente de migración a .env.
+
+ @database
+ - Tablas:
+   - ListComprasCocina: lista de artículos de compra (Departamento, Descripcion,
+     Cantidad, Fecha)
+ - Operaciones: INSERT (una sentencia por artículo por categoría)
+
+ @session
+ (No utiliza sesión PHP directamente en este archivo)
+
+ @inputs $_POST
+ - Carnes: cadena de artículos de carne separados por coma
+ - Frutas: cadena de artículos de fruta separados por coma
+ - Verduras: cadena de artículos de verduras separados por coma
+ - Lacteos: cadena de artículos de lácteos separados por coma
+ - Accesorios: cadena de artículos de accesorios separados por coma
+ - Fecha: fecha de la compra (type="date", formato YYYY-MM-DD)
+ - submit: botón que activa el procesamiento PHP
+
+ @outputs
+ - HTML con formulario de captura por categorías
+ - Tabla DataTables alimentada desde JavaScript (lado cliente, no desde PHP)
+ - Archivo .xlsx descargable generado con XLSX.js
+
+ @security
+ @warning VULNERABILIDAD DE SEGURIDAD CRÍTICA: Inyección SQL (SQL Injection).
+          Los valores de $_POST (Carnes, Frutas, Verduras, Lacteos, Accesorios, Fecha)
+          son procesados con test_input() (solo sanitiza HTML, no SQL) y luego
+          insertados DIRECTAMENTE en las sentencias SQL mediante interpolación de
+          variables de PHP (ej: "INSERT ... Values('Carnes','$prueba[$i]','','$mes5')").
+          Un atacante puede inyectar código SQL arbitrario a través de cualquiera de
+          los campos textarea o del campo Fecha.
+          ACCIÓN REQUERIDA: Reemplazar la interpolación directa por parámetros
+          enlazados (prepared statements) usando sqlsrv_prepare() + sqlsrv_execute()
+          o sqlsrv_query() con el array de parámetros.
+ @uses getComedorConnection() Conexión centralizada desde config/database.php.
+ @note La categoría "Accesorios" en el INSERT PHP utiliza 'Carnes' como valor del
+       campo Departamento (línea de $sql4) — esto parece ser un defecto (copy/paste bug).
+
+ @author Equipo Tecnología BacroCorp
+ @version 1.0
+ @since 2024
+ @updated 2026-02-18
+-->
 <!-- Carniceria, Frutas, Verduras,Lácteos,Accesorios -->
 <!DOCTYPE html>
 <form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>">
@@ -405,13 +481,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
 ////////////////// Select
 
-// $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02","CharacterSet" => "UTF-8");
-// $conn = sqlsrv_connect( $serverName, $connectionInfo);
-
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
 // if( $conn ) {
      // echo "Conexión establecida.<br />";
@@ -445,6 +516,37 @@ $i2 = 0;
 $i2 = 0;
 $i4 = 0;
 
+/* =========================================================
+ * INSERCIÓN SQL: Artículos de compra por categoría
+ * Tabla involucrada: ListComprasCocina
+ * Columnas: Departamento (categoría fija), Descripcion (artículo), Cantidad (''), Fecha
+ *
+ * Patrón: Bucle while + INSERT individual por cada artículo de cada categoría
+ *
+ * Descripción:
+ *  Se ejecuta un INSERT por cada elemento de los arrays generados por explode():
+ *   - $prueba   → categoría 'Carnes'
+ *   - $prueba1  → categoría 'Frutas'
+ *   - $prueba2  → categoría 'Verduras'
+ *   - $prueba3  → categoría 'Lácteos'
+ *   - $prueba4  → categoría 'Accesorios' (ver bug en @note abajo)
+ *
+ * @warning VULNERABILIDAD CRÍTICA - SQL INJECTION:
+ *          Las variables $prueba[$i] y $mes5 se interpolan DIRECTAMENTE en las
+ *          cadenas SQL sin usar parámetros enlazados (prepared statements).
+ *          La función test_input() solo aplica htmlspecialchars() (protección HTML),
+ *          NO protege contra inyección SQL.
+ *          Ejemplo vulnerable:
+ *            "Insert ... Values('Carnes','$prueba[$i]','','$mes5')"
+ *          Si un usuario ingresa: lomo', ''); DROP TABLE ListComprasCocina; --
+ *          podría ejecutar SQL arbitrario.
+ *          CORRECCIÓN REQUERIDA: Usar sqlsrv_query($conn, $sql, [$param1, $param2])
+ *          con placeholders (?) en lugar de interpolación de variables.
+ *
+ * @note Defecto detectado (copy/paste bug): el INSERT de la categoría Accesorios
+ *       ($sql4) tiene hardcodeado 'Carnes' como Departamento en lugar de 'Accesorios'.
+ * =========================================================
+ */
 //////////////// while array
 
 while($i < count($prueba))
@@ -519,6 +621,20 @@ sqlsrv_free_stmt( $stmt);
 
 }
 
+/**
+ * @brief Sanitiza una cadena de texto para uso seguro en el contexto HTML.
+ *
+ * Elimina espacios al inicio y al final, elimina barras invertidas de escape
+ * (stripslashes) y convierte caracteres especiales HTML a entidades (htmlspecialchars).
+ *
+ * @param string $data Cadena de texto recibida desde $_POST
+ * @return string Cadena sanitizada para HTML
+ *
+ * @warning Esta función ÚNICAMENTE protege contra XSS (inyección HTML).
+ *          NO ofrece protección contra inyección SQL. Los valores devueltos
+ *          por esta función NO deben interpolarse directamente en sentencias SQL.
+ *          Ver la advertencia de SQL Injection en el encabezado del archivo.
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);

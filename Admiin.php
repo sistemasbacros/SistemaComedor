@@ -1,4 +1,80 @@
 <?php
+/**
+ * @file Admiin.php
+ * @brief Portal de autenticación y punto de entrada al Sistema Comedor de BacroCorp.
+ *
+ * @description
+ * Módulo de login principal del Sistema Comedor. Presenta la pantalla de autenticación
+ * con diseño glassmorphism animado. Valida las credenciales del empleado contra la base
+ * de datos y establece la sesión PHP correspondiente.
+ *
+ * Para usuarios cuya área es "DIRECCIÓN", el sistema despliega un modal de selección
+ * de rol que permite acceder en modo Administrador (admicome4.php) o en modo Usuario
+ * estándar (MenUsuario.php). El resto de áreas son redirigidas directamente a MenUsuario.php.
+ *
+ * Incluye protección CSRF mediante token de sesión (verificación permisiva: comprueba
+ * existencia de ambos tokens), regeneración de ID de sesión tras login exitoso y
+ * huella digital del navegador para mayor seguridad.
+ *
+ * ADVERTENCIA DE SEGURIDAD: Las credenciales de base de datos están codificadas
+ * directamente en el archivo (hardcoded). Se recomienda migrar al sistema de
+ * variables de entorno usando config/database.php según el estándar del proyecto.
+ *
+ * @module Módulo de Autenticación
+ * @access Público (página de login — sin sesión previa requerida)
+ *
+ * @dependencies
+ * - PHP: session_set_cookie_params(), session_start(), session_regenerate_id(), sqlsrv_connect(), sqlsrv_query()
+ * - JS CDN: Bootstrap 5.3.0-alpha1, Tailwind CSS (CDN), Font Awesome 6.4.0, AOS Animation 2.3.1
+ *
+ * @database
+ * - Servidor: DESAROLLO-BACRO\SQLEXPRESS (hardcoded — pendiente migrar a .env)
+ * - Base de datos: Comedor
+ * - Tablas: Conped
+ * - Operaciones: SELECT (verificación de credenciales por Usuario y Contrasena)
+ * - Campos leídos: Id_Empleado, Nombre, Area, Usuario, Contrasena
+ *
+ * @session
+ * - Variables establecidas en login exitoso:
+ *   - $_SESSION['user_id']                   — ID del empleado autenticado
+ *   - $_SESSION['user_name']                 — Nombre completo del empleado
+ *   - $_SESSION['user_area']                 — Área/rol del empleado (p. ej. DIRECCIÓN, COCINA)
+ *   - $_SESSION['user_username']             — Nombre de usuario utilizado en el login
+ *   - $_SESSION['logged_in']                 — Bandera booleana de autenticación (true)
+ *   - $_SESSION['LOGIN_TIME']                — Timestamp Unix del momento del login
+ *   - $_SESSION['authenticated_from_login']  — Indica autenticación por formulario
+ *   - $_SESSION['session_id']                — ID de sesión actual tras regeneración
+ *   - $_SESSION['browser_fingerprint']       — MD5 de User-Agent + REMOTE_ADDR
+ *   - $_SESSION['login_token']               — Token CSRF generado con random_bytes(32)
+ * - Roles evaluados: Área "DIRECCIÓN" (variantes con/sin tilde, con espacios)
+ *
+ * @inputs
+ * - $_POST['usuario']        — Nombre de usuario para autenticación
+ * - $_POST['contrasena']     — Contraseña del usuario
+ * - $_POST['login_token']    — Token CSRF para validación de origen del formulario
+ * - $_POST['role_selection'] — Selección de rol post-login para área DIRECCIÓN ('admin' | 'user')
+ *
+ * @outputs HTML (página completa con formulario de login y modal de selección de rol)
+ *
+ * @security
+ * - Protección CSRF: token de sesión (bin2hex/random_bytes) verificado en cada envío
+ * - Regeneración de ID de sesión: session_regenerate_id(true) tras login exitoso
+ * - Huella digital de navegador: MD5(HTTP_USER_AGENT + REMOTE_ADDR)
+ * - Headers HTTP: Cache-Control: no-cache, no-store, must-revalidate; Pragma: no-cache;
+ *                 Expires: 0; X-Content-Type-Options: nosniff
+ * - Cookie de sesión: HttpOnly=true, SameSite=Lax, path=/Comedor/
+ * - Consulta parametrizada con array de parámetros en sqlsrv_query (previene SQL Injection)
+ * - Salida HTML escapada con htmlspecialchars() para prevenir XSS
+ * - Limpieza de campos del formulario en beforeunload y window.load
+ * - Recarga forzada en pageshow si la página proviene de cache (event.persisted)
+ * - PENDIENTE: Migrar credenciales hardcoded a variables de entorno (.env)
+ * - PENDIENTE: Implementar hashing de contraseñas (actualmente en texto plano en BD)
+ *
+ * @author Equipo Tecnología BacroCorp
+ * @version 1.0
+ * @since 2024
+ * @updated 2026-02-18
+ */
 // Configuración de sesión mejorada
 session_set_cookie_params([
     'lifetime' => 0,
@@ -18,14 +94,7 @@ header("X-Content-Type-Options: nosniff");
 // Iniciar sesión
 session_start();
 
-// Configuración de conexión a la base de datos
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8"
-);
+require_once __DIR__ . '/config/database.php';
 
 // Variables para el estado del login
 $loginError = '';
@@ -52,12 +121,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['usuario']) && isset($
         $_SESSION['login_token'] = bin2hex(random_bytes(32));
         $loginError = 'Error de sesión. Por favor, recargue la página e intente nuevamente.';
     } else {
-        $conn = sqlsrv_connect($serverName, $connectionOptions);
+        $conn = getComedorConnection();
         
         if ($conn) {
+            /* =========================================================
+             * OPERACIÓN: READ
+             * Tabla: Conped
+             * Campos leídos: Id_Empleado, Nombre, Area, Usuario, Contrasena
+             * Condición: Usuario y Contrasena coinciden con los enviados por formulario
+             * Propósito: Verificar credenciales de acceso del empleado
+             * =========================================================
+             */
             // Consulta para verificar las credenciales
-            $sql = "SELECT Id_Empleado, Nombre, Area, Usuario, Contrasena 
-                    FROM Conped 
+            $sql = "SELECT Id_Empleado, Nombre, Area, Usuario, Contrasena
+                    FROM Conped
                     WHERE Usuario = ? AND Contrasena = ?";
             $params = array($usuario, $contrasena);
             $stmt = sqlsrv_query($conn, $sql, $params);
@@ -131,7 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['usuario']) && isset($
                     } else {
                         // Para otras áreas, redirigir directamente a MenUsuario.php
                         error_log("Redirigiendo a MenUsuario.php para: " . $userArea);
-                        header("Location: http://desarollo-bacros/Comedor/MenUsuario.php");
+                        header("Location: MenUsuario.php");
                         exit;
                     }
                     
@@ -158,10 +235,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['role_selection'])) {
     $selectedRole = $_POST['role_selection'];
     
     if ($selectedRole === 'admin') {
-        header("Location: http://desarollo-bacros/Comedor/admicome4.php");
+        header("Location: admicome4.php");
         exit;
     } elseif ($selectedRole === 'user') {
-        header("Location: http://desarollo-bacros/Comedor/MenUsuario.php");
+        header("Location: MenUsuario.php");
         exit;
     }
 }
@@ -743,9 +820,9 @@ if (!isset($_SESSION['login_token'])) {
             // Redirigir según la selección
             setTimeout(function() {
                 if (role === 'admin') {
-                    window.location.href = 'http://desarollo-bacros/Comedor/admicome4.php';
+                    window.location.href = 'admicome4.php';
                 } else {
-                    window.location.href = 'http://desarollo-bacros/Comedor/MenUsuario.php';
+                    window.location.href = 'MenUsuario.php';
                 }
             }, 500);
         }

@@ -1,26 +1,102 @@
 <?php
+/**
+ * @file dchef.php
+ * @brief Dashboard principal del Chef para gestión operativa de comidas en tiempo real.
+ *
+ * @description
+ * Módulo central de operaciones de cocina. Proporciona al Chef una interfaz completa
+ * para gestionar todos los aspectos del servicio diario de alimentos:
+ *
+ *  - Módulo "Comidas a Servir": lista en tiempo real de empleados con comida registrada
+ *    hoy, con opción de marcar cada comida como ATENDIDA via AJAX.
+ *  - Módulo "Complementos": lista de complementos (café, té, etc.) del día, con
+ *    capacidad de marcarlos como atendidos.
+ *  - Módulo "Registros de Comida": formulario manual para crear registros de comida
+ *    ad hoc (para casos no registrados en el sistema normal).
+ *  - Módulo "Asignar Comidas": gestión de cancelaciones aprobadas del día; el Chef
+ *    puede asignar o liberar un espacio a otro empleado.
+ *  - Módulo "Configuración": muestra información del usuario y conexión a BD (solo lectura).
+ *
+ * La autenticación es propia del archivo (usuario/contraseña fija: chef/chef1234).
+ * La sesión PHP se gestiona en $_SESSION['usuario'].
+ * Las acciones AJAX llegan via $_GET['action'] y devuelven JSON.
+ * La UI se actualiza automáticamente cada 30 segundos mediante setInterval.
+ *
+ * @module Módulo de Cocina
+ * @access Chef (autenticación local propia; independiente del sistema general de sesiones)
+ *
+ * @dependencies
+ * - Librerías JS CDN:
+ *   - Bootstrap 5.3.0 (JS + CSS): layout y componentes modales
+ *   - Font Awesome 6.4.0: iconografía
+ *   - Google Fonts (Inter): tipografía
+ *   - SweetAlert2 11: alertas y confirmaciones
+ *   - Flatpickr (JS + CSS + locale es): selector de fecha y hora
+ * - PHP: extensión sqlsrv (Microsoft SQL Server)
+ * @note Este archivo NO utiliza config/database.php — gestiona su propia conexión
+ *       con credenciales hardcodeadas. Pendiente de migración a .env.
+ *
+ * @database
+ * - Tablas:
+ *   - Entradas: registros de comidas diarias (lectura y actualización de estatus)
+ *   - complementos: registros de complementos diarios (lectura y actualización)
+ *   - Cancelaciones: cancelaciones aprobadas del día (lectura, UPDATE asignación/liberación)
+ *   - ConPed: catálogo de empleados con pedido (lectura para select de asignación)
+ *   - entradas: registro manual de comidas (INSERT)
+ * - Operaciones: SELECT, UPDATE, INSERT
+ *
+ * @session
+ * - $_SESSION['usuario']['nombre']: nombre del chef autenticado
+ * - $_SESSION['usuario']['rol']: rol del usuario (siempre 'chef')
+ * - $_SESSION['usuario']['logueado']: bandera booleana de sesión activa
+ *
+ * @inputs
+ * - $_GET['action']: acción AJAX a ejecutar (get_comidas, get_estadisticas,
+ *   marcar_atendido, get_complementos, get_estadisticas_complementos,
+ *   marcar_complemento_atendido, get_cancelaciones, asignar_cancelacion,
+ *   liberar_cancelacion, crear_registro_comida, get_registros_hoy)
+ * - $_GET['page']: módulo a mostrar (comidas, complementos, registros, asignar, configuracion)
+ * - $_GET['logout']: si está presente, destruye la sesión
+ * - $_POST['login'] + $_POST['usuario'] + $_POST['contrasena']: autenticación
+ * - $_POST['nombre'], $_POST['hora_entrada'], $_POST['fecha_hora']: marcar comida atendida
+ * - $_POST['nombre'], $_POST['complemento'], $_POST['fecha'], $_POST['hora']: marcar complemento
+ * - $_POST['nombre_cancelacion'], $_POST['tipo_consumo'], $_POST['fecha_cancelacion'],
+ *   $_POST['id_persona'], $_POST['nombre_persona']: asignar cancelación
+ * - $_POST['nombre_corto'], $_POST['fecha_real'], $_POST['hora_real']: crear registro manual
+ *
+ * @outputs
+ * - HTML completo (dashboard con sidebar y navbar) cuando se accede normalmente
+ * - JSON (application/json) cuando se invoca con $_GET['action']
+ *
+ * @security
+ * - Autenticación mediante sesión PHP administrada localmente
+ * - Las funciones asignarCancelacion() y liberarCancelacion() verifican que haya sesión activa
+ * - Las operaciones UPDATE utilizan parámetros enlazados (prepared statements de sqlsrv)
+ *   para evitar inyección SQL
+ * - La función crearRegistroComida() valida formato de fecha (dd-mm-yyyy) y hora (HH:MM:SS)
+ *   con expresiones regulares antes de ejecutar el INSERT
+ * @uses getComedorConnection() Conexión centralizada desde config/database.php.
+ * @warning La contraseña de autenticación del Chef está hardcodeada (chef/chef1234).
+ *          Debe migrarse a un mecanismo de autenticación centralizado.
+ *
+ * @author Equipo Tecnología BacroCorp
+ * @version 1.4
+ * @since 2024
+ * @updated 2026-02-18
+ */
+
 // =============================================
 // DASHBOARD CHEF - SISTEMA COMPLETO CON COMPLEMENTOS Y REGISTROS
 // =============================================
 
 session_start();
 
-// Configuración de conexión a la base de datos
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03", 
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
+require_once __DIR__ . '/config/database.php';
 
-// Función para obtener conexión
 function getConnection() {
-    global $serverName, $connectionOptions;
-    $conn = sqlsrv_connect($serverName, $connectionOptions);
+    $conn = getComedorConnection();
     if ($conn === false) {
-        die(json_encode(['success' => false, 'message' => 'Error de conexión a la base de datos']));
+        die(json_encode(['success' => false, 'message' => 'Error de conexión a la base de datos.']));
     }
     return $conn;
 }
@@ -61,6 +137,17 @@ $pagina_actual = $_GET['page'] ?? 'comidas';
 // FUNCIONES PARA EL MÓDULO DE COMIDAS
 // =============================================
 
+/**
+ * @brief Recupera todas las comidas registradas para el día actual y las devuelve como JSON.
+ *
+ * Consulta la tabla Entradas filtrando por la fecha del día (GETDATE()). Para cada
+ * registro limpia el campo Nombre aplicando una expresión CASE que extrae solo el
+ * nombre del empleado a partir de cadenas compuestas (ej.: "NOMBRE: JUAN N.E: 10...").
+ * Genera un Id_Unico por comida usando md5(nombre + fecha + hora_comida).
+ * Termina la ejecución enviando la respuesta JSON directamente (exit).
+ *
+ * @return void Emite JSON con estructura: { success: bool, comidas: array }
+ */
 function getComidas() {
     $conn = getConnection();
     
@@ -162,6 +249,15 @@ function getComidas() {
     exit;
 }
 
+/**
+ * @brief Obtiene el resumen estadístico de comidas del día actual y lo devuelve como JSON.
+ *
+ * Ejecuta un COUNT sobre la tabla Entradas para el día de hoy, calculando el total,
+ * el número de comidas ATENDIDAS y el número de comidas PENDIENTES mediante SUM/CASE.
+ * Termina la ejecución enviando la respuesta JSON directamente (exit).
+ *
+ * @return void Emite JSON con estructura: { success: bool, estadisticas: { total, atendidos, pendientes } }
+ */
 function getEstadisticas() {
     $conn = getConnection();
     
@@ -191,6 +287,17 @@ function getEstadisticas() {
     exit;
 }
 
+/**
+ * @brief Marca una comida específica del día como ATENDIDA en la tabla Entradas.
+ *
+ * Recibe via $_POST el nombre limpio del empleado, la fecha de entrada (Hora_Entrada)
+ * y la hora de comida (Fecha). Realiza el UPDATE usando parámetros enlazados para
+ * evitar inyección SQL. La identificación del registro se hace comparando el nombre
+ * calculado dinámicamente con la misma lógica CASE del SELECT, la fecha de entrada
+ * y la hora de la comida. Solo actualiza registros con Estatus NULL o 'PENDIENTE'.
+ *
+ * @return void Emite JSON con estructura: { success: bool, message: string, rows: int }
+ */
 function marcarAtendido() {
     if (!isset($_POST['nombre']) || !isset($_POST['hora_entrada']) || !isset($_POST['fecha_hora'])) {
         http_response_code(400);
@@ -290,6 +397,17 @@ function marcarAtendido() {
 // FUNCIONES PARA EL MÓDULO DE COMPLEMENTOS
 // =============================================
 
+/**
+ * @brief Recupera todos los complementos registrados para el día actual y los devuelve como JSON.
+ *
+ * Consulta la tabla complementos filtrando por la fecha del día (GETDATE()). Aplica la
+ * misma lógica CASE de limpieza de nombres que getComidas(). Formatea fecha y hora,
+ * calcula el estatus ('ATENDIDO' si atendido=1, 'PENDIENTE' en caso contrario) y
+ * genera un Id_Unico md5(nombre + fecha + hora + tipo_complemento).
+ * Termina la ejecución enviando la respuesta JSON directamente (exit).
+ *
+ * @return void Emite JSON con estructura: { success: bool, complementos: array }
+ */
 function getComplementos() {
     $conn = getConnection();
     
@@ -391,6 +509,15 @@ function getComplementos() {
     exit;
 }
 
+/**
+ * @brief Obtiene el resumen estadístico de complementos del día actual y lo devuelve como JSON.
+ *
+ * Ejecuta un COUNT sobre la tabla complementos para el día de hoy, calculando total,
+ * atendidos (atendido=1) y pendientes mediante SUM/CASE.
+ * Termina la ejecución enviando la respuesta JSON directamente (exit).
+ *
+ * @return void Emite JSON con estructura: { success: bool, estadisticas: { total, atendidos, pendientes } }
+ */
 function getEstadisticasComplementos() {
     $conn = getConnection();
     
@@ -420,6 +547,17 @@ function getEstadisticasComplementos() {
     exit;
 }
 
+/**
+ * @brief Marca un complemento específico del día como atendido en la tabla complementos.
+ *
+ * Recibe via $_POST el nombre del empleado, el tipo de complemento, la fecha (dd/mm/yyyy)
+ * y la hora (HH:MM o HH:MM:SS). Valida que todos los campos estén presentes y realiza
+ * el UPDATE con parámetros enlazados. Identifica el registro comparando: fecha, los
+ * primeros 5 caracteres de la hora, el tipo de complemento y el nombre calculado con
+ * la misma lógica CASE. Solo actualiza registros con atendido NULL o 0.
+ *
+ * @return void Emite JSON con estructura: { success: bool, message: string }
+ */
 function marcarComplementoAtendido() {
     if (!isset($_POST['nombre']) || !isset($_POST['complemento']) || !isset($_POST['fecha']) || !isset($_POST['hora'])) {
         http_response_code(400);
@@ -524,6 +662,15 @@ function marcarComplementoAtendido() {
 // FUNCIONES PARA EL MÓDULO DE ASIGNACIÓN
 // =============================================
 
+/**
+ * @brief Obtiene la lista completa de empleados del catálogo ConPed ordenada por nombre.
+ *
+ * Utilizada para poblar el selector de empleados en el módulo "Asignar Comidas".
+ * A diferencia de las demás funciones del archivo, devuelve el array en lugar de
+ * emitir JSON directamente — el llamador es quien serializa el resultado.
+ *
+ * @return array Arreglo asociativo con campos Id_Empleado, Nombre, Area
+ */
 function getEmpleados() {
     $conn = getConnection();
     
@@ -542,6 +689,15 @@ function getEmpleados() {
     return $empleados;
 }
 
+/**
+ * @brief Obtiene las cancelaciones aprobadas del día actual y las devuelve como JSON.
+ *
+ * Consulta la tabla Cancelaciones filtrando por ESTATUS='APROBADO' y fecha de hoy.
+ * Formatea las fechas DateTime a strings legibles (dd/mm/YYYY y dd/mm/YYYY HH:MM).
+ * Termina la ejecución enviando la respuesta JSON directamente (exit).
+ *
+ * @return void Emite JSON con estructura: { success: bool, cancelaciones: array }
+ */
 function getCancelaciones() {
     $conn = getConnection();
     
@@ -593,6 +749,17 @@ function getCancelaciones() {
     exit;
 }
 
+/**
+ * @brief Asigna una cancelación aprobada a un empleado específico.
+ *
+ * Requiere sesión activa. Actualiza los campos de asignación en la tabla Cancelaciones:
+ * APARTADO_POR (Id_Empleado), USUARIO_APARTA (nombre), ESTATUS_APARTADO='ASIGNADO',
+ * FECHA_APARTADO=GETDATE(), ESTATUS_SOLICITUD='APROBADA' y APARTADO_APROBADO_POR
+ * (nombre del chef en sesión). La identificación del registro se hace por NOMBRE,
+ * TIPO_CONSUMO y FECHA (con parámetros enlazados).
+ *
+ * @return void Emite JSON con estructura: { success: bool, message: string }
+ */
 function asignarCancelacion() {
     if (!isset($_SESSION['usuario']) || !$_SESSION['usuario']['logueado']) {
         echo json_encode(['success' => false, 'message' => 'No autorizado']);
@@ -654,6 +821,16 @@ function asignarCancelacion() {
     exit;
 }
 
+/**
+ * @brief Libera una cancelación previamente asignada, dejando todos sus campos de asignación en NULL.
+ *
+ * Requiere sesión activa. Pone en NULL los campos: APARTADO_POR, USUARIO_APARTA,
+ * ESTATUS_APARTADO, FECHA_APARTADO, ESTATUS_SOLICITUD, MOTIVO_SOLICITUD, FECHA_SOLICITUD,
+ * MOTIVO_RECHAZO, RECHAZADO_POR, FECHA_RECHAZO y APARTADO_APROBADO_POR.
+ * La cancelación queda disponible nuevamente para ser asignada.
+ *
+ * @return void Emite JSON con estructura: { success: bool, message: string }
+ */
 function liberarCancelacion() {
     if (!isset($_SESSION['usuario']) || !$_SESSION['usuario']['logueado']) {
         echo json_encode(['success' => false, 'message' => 'No autorizado']);
@@ -714,7 +891,18 @@ function liberarCancelacion() {
 // FUNCIONES PARA EL MÓDULO DE REGISTROS DE COMIDA
 // =============================================
 
-// Mapeo de nombres completos
+/**
+ * @brief Mapa de nombres cortos a cadenas completas de empleado para el módulo de Registros.
+ *
+ * Asocia el nombre corto legible (clave) con la cadena de metadata completa del empleado
+ * (valor) tal como se almacena en la columna Nombre de la tabla entradas. Se usa en
+ * crearRegistroComida() para traducir la selección del Chef al formato esperado por la BD.
+ *
+ * @note Esta lista es estática y debe mantenerse sincronizada manualmente con el catálogo
+ *       de empleados. Pendiente de refactorizar para leerla dinámicamente desde la BD.
+ *
+ * @var array<string, string>
+ */
 $nombresCompletos = [
     "ALEJANDRA CRUZ" => "NOMBRE: ALEJANDRA CRUZ N.E: 3 DEPARTAMENTO: DIRECCION AREA: DIRECCION ZONA: ZINACANTEPEC PUESTO: ANALISTA NSS: 0000000000 CEL: 24",
     "ALTA DIRECCION" => "NOMBRE: ALTA DIRECCION N.E: 4 DEPARTAMENTO: DIRECCION AREA: DIRECCION ZONA: ZINACANTEPEC PUESTO: DIRECCION NSS: 0000000000 CEL: 26",
@@ -726,6 +914,19 @@ $nombresCompletos = [
     "VIGILANCIA" => "NOMBRE: VIGILANCIA N.E: 105868 DEPARTAMENTO: SERVICIOS GENERALES AREA: VIGILANCIA ZONA: ZINACANTEPEC PUESTO: VIGILANTE NSS: 000000000000"
 ];
 
+/**
+ * @brief Inserta manualmente un registro de comida en la tabla entradas.
+ *
+ * Permite al Chef registrar una comida que no fue ingresada por el canal normal.
+ * Recibe via $_POST el nombre corto del empleado (key del array $nombresCompletos),
+ * una fecha en formato dd-mm-yyyy y una hora en formato HH:MM:SS.
+ * Ambos formatos se validan con expresiones regulares antes del INSERT.
+ * Si el nombre corto existe en $nombresCompletos, se almacena el nombre completo
+ * (con toda la metadata del empleado); de lo contrario se almacena el nombre tal cual.
+ * El registro se crea con Estatus='PENDIENTE'.
+ *
+ * @return void Emite JSON con estructura: { success: bool, message: string }
+ */
 function crearRegistroComida() {
     global $nombresCompletos;
     
@@ -780,6 +981,16 @@ function crearRegistroComida() {
     exit;
 }
 
+/**
+ * @brief Recupera todos los registros de comida del día actual desde la tabla entradas.
+ *
+ * Filtra por Hora_Entrada igual a la fecha de hoy en formato dd-mm-YYYY.
+ * Limpia el campo Nombre usando preg_replace para extraer solo el nombre del empleado
+ * de cadenas compuestas que contengan "NOMBRE:". Formatea Fecha_Atendido como HH:MM:SS.
+ * Termina la ejecución enviando la respuesta JSON directamente (exit).
+ *
+ * @return void Emite JSON con estructura: { success: bool, registros: array, hoy: string }
+ */
 function getRegistrosHoy() {
     $conn = getConnection();
     
@@ -2123,15 +2334,11 @@ if (isset($_GET['action'])) {
                                     <div class="mt-4">
                                         <div class="mb-3">
                                             <label class="form-label fw-bold">Servidor</label>
-                                            <input type="text" class="form-control" value="DESAROLLO-BACRO\SQLEXPRESS" readonly>
+                                            <input type="text" class="form-control" value="<?= htmlspecialchars(getenv('DB_COMEDOR_SERVER')) ?>" readonly>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label fw-bold">Base de Datos</label>
-                                            <input type="text" class="form-control" value="Comedor" readonly>
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label fw-bold">Usuario BD</label>
-                                            <input type="text" class="form-control" value="Larome03" readonly>
+                                            <input type="text" class="form-control" value="<?= htmlspecialchars(getenv('DB_COMEDOR_DATABASE')) ?>" readonly>
                                         </div>
                                     </div>
                                 </div>

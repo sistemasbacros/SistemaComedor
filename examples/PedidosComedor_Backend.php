@@ -14,10 +14,6 @@
 class PedidosComedor {
     
     private $conn;
-    private $serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-    private $database = "Comedor";
-    private $username = "Larome03";
-    private $password = "Larome03";
     
     // ==========================================
     // CONSTRUCTOR
@@ -36,17 +32,9 @@ class PedidosComedor {
     // ==========================================
     
     private function conectarBD() {
-        $connectionInfo = [
-            "Database" => $this->database,
-            "UID" => $this->username,
-            "PWD" => $this->password,
-            "CharacterSet" => "UTF-8",
-            "TrustServerCertificate" => true,
-            "LoginTimeout" => 5
-        ];
-        
-        $this->conn = sqlsrv_connect($this->serverName, $connectionInfo);
-        
+        require_once __DIR__ . '/../config/database.php';
+        $this->conn = getComedorConnection();
+
         if (!$this->conn) {
             throw new Exception("Error de conexión: " . print_r(sqlsrv_errors(), true));
         }

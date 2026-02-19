@@ -1,5 +1,75 @@
 <?php
+/**
+ * @file FormatCancel.php
+ * @brief Formulario de solicitud de cancelación de pedido de comedor.
+ *
+ * @description
+ * Módulo que permite a un empleado autenticado solicitar la cancelación de un pedido
+ * de comedor previamente agendado. El formulario recoge los datos de la cancelación
+ * (jefe, tipo de consumo, fecha, causa y descripción), valida que no existan duplicados
+ * en la tabla Cancelaciones y registra la solicitud con estatus PENDIENTE.
+ *
+ * Flujo de ejecución:
+ * 1. Verifica que exista sesión activa ($_SESSION['user_name']). Si no, redirige a Admiin.php.
+ * 2. Si el método es GET, renderiza el formulario HTML.
+ * 3. Si el método es POST:
+ *    a. Sanitiza todos los campos con test_input().
+ *    b. Valida que la descripción no esté vacía.
+ *    c. Valida que la fecha esté dentro del rango permitido.
+ *    d. Conecta a SQL Server (BD Comedor).
+ *    e. Verifica duplicados (misma combinación nombre+depto+fecha+consumo).
+ *    f. Si no hay duplicado, inserta en tabla Cancelaciones.
+ *    g. Muestra mensaje de éxito o error al usuario.
+ *
+ * @module Módulo de Cancelaciones
+ * @access Todos los empleados autenticados
+ *
+ * @dependencies
+ * - PHP: session_start(), sqlsrv_connect(), sqlsrv_query()
+ * - JS CDN: Bootstrap 5 (CSS y JS)
+ * - Archivos locales: ninguno
+ *
+ * @database
+ * - Servidor: DESAROLLO-BACRO\SQLEXPRESS (hardcoded — pendiente migración a .env)
+ * - Base de datos: Comedor
+ * - Tabla principal: Cancelaciones
+ * - Operaciones: SELECT (verificar duplicado), INSERT (registrar cancelación)
+ *
+ * @session
+ * - $_SESSION['user_name']  : string - Nombre del empleado autenticado (requerido)
+ * - $_SESSION['user_area']  : string - Área/Departamento del empleado (requerido)
+ *
+ * @inputs
+ * - $_POST['inputAddress']  : string - Nombre del jefe inmediato
+ * - $_POST['inputState']    : string - Tipo de consumo (Desayuno | Comida)
+ * - $_POST['inputZip']      : string - Fecha del pedido a cancelar (YYYY-MM-DD)
+ * - $_POST['inputState1']   : string - Causa de la cancelación
+ * - $_POST['descripcion']   : string - Descripción detallada del motivo (obligatoria)
+ *
+ * @outputs
+ * - HTML: Formulario de cancelación renderizado
+ * - HTML: Mensaje de alerta (éxito o error) tras el envío
+ *
+ * @security
+ * - Verificación de sesión activa antes de procesar
+ * - Sanitización de inputs con htmlspecialchars, trim, stripslashes
+ * - Consultas preparadas (prepared statements con parámetros ?)
+ * - Validación de rango de fechas permitidas
+ * - Prevención de duplicados mediante SELECT previo al INSERT
+ *
+ * @uses getComedorConnection() Conexión centralizada desde config/database.php.
+ *
+ * @author Equipo Tecnología BacroCorp
+ * @version 1.0
+ * @since 2024
+ * @updated 2026-02-18
+ */
+
 session_start();
+
+// ---------------------------------------------------------------------------
+// SECCIÓN: Control de sesión
+// ---------------------------------------------------------------------------
 
 // Obtener información del usuario desde la sesión
 $user_name = $_SESSION['user_name'] ?? '';
@@ -7,10 +77,19 @@ $user_area = $_SESSION['user_area'] ?? '';
 
 // Si no hay sesión activa, redirigir al login
 if (empty($user_name)) {
-    header("Location: http://desarollo-bacros/Comedor/Admiin.php");
+    header("Location: Admiin.php");
     exit;
 }
 
+/**
+ * @brief Sanitiza una cadena de entrada del usuario.
+ *
+ * Aplica trim, stripslashes y htmlspecialchars para limpiar
+ * datos recibidos del formulario antes de procesarlos.
+ *
+ * @param  string $data  Cadena de texto sin procesar
+ * @return string        Cadena sanitizada y segura para uso en HTML
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);
@@ -22,10 +101,18 @@ $alertMessage = '';
 $alertType = ''; // 'success' o 'error'
 $formSubmitted = false;
 
+// ---------------------------------------------------------------------------
+// SECCIÓN: Variables de datos empleado (precargadas desde sesión)
+// ---------------------------------------------------------------------------
+
 // Datos del formulario para mostrar en caso de éxito
 $datosGuardados = [];
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+
+    // -----------------------------------------------------------------------
+    // SECCIÓN: Recopilación y sanitización de inputs POST
+    // -----------------------------------------------------------------------
     $nombre = $user_name;
     $departamento = $user_area;
 
@@ -44,11 +131,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         'descripcion' => $descripcion
     ];
 
+    // -----------------------------------------------------------------------
+    // SECCIÓN: Validación de campo obligatorio — descripción
+    // -----------------------------------------------------------------------
     // Validar que la descripción no esté vacía
     if (empty($descripcion)) {
         $alertMessage = "La descripción del motivo es obligatoria.";
         $alertType = "error";
     } else {
+        // -----------------------------------------------------------------------
+        // SECCIÓN: Validación de rango de fechas permitido
+        // Nota: El rango $fechaMin / $fechaMax está hardcodeado y deberá
+        // externalizarse a configuración cuando se amplíe el período permitido.
+        // -----------------------------------------------------------------------
         $fechaActual = date('Y-m-d');
         $horaActual = date('H:i:s');
 
@@ -59,20 +154,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $alertMessage = "La fecha seleccionada no está dentro del periodo permitido.";
             $alertType = "error";
         } else {
-            $serverName = "DESAROLLO-BACRO\SQLEXPRESS";
-            $connectionInfo = [
-                "Database" => "Comedor",
-                "UID" => "Larome03",
-                "PWD" => "Larome03",
-                "CharacterSet" => "UTF-8"
-            ];
-            $conn = sqlsrv_connect($serverName, $connectionInfo);
+            /* =========================================================
+             * CONEXIÓN A BASE DE DATOS Y PROCESAMIENTO DE CANCELACIÓN
+             * =========================================================
+             * Se conecta a SQL Server y ejecuta las siguientes operaciones:
+             * 1. SELECT: verifica si ya existe una cancelación duplicada
+             * 2. INSERT: registra la nueva solicitud si no hay duplicado
+             */
+            require_once __DIR__ . '/config/database.php';
+            $conn = getComedorConnection();
 
             if ($conn === false) {
                 $alertMessage = "Error al conectar a la base de datos.";
                 $alertType = "error";
             } else {
-                // Verificar si ya existe cancelación para el mismo nombre, departamento, fecha y tipo de consumo
+                // -------------------------------------------------------------------
+                // SECCIÓN: Verificación de duplicados en tabla Cancelaciones
+                // Previene registros duplicados para la misma combinación:
+                // nombre + departamento + fecha + tipo_consumo
+                // Consulta parametrizada para prevenir inyección SQL.
+                // -------------------------------------------------------------------
                 $checkSql = "SELECT COUNT(*) AS count FROM Cancelaciones WHERE NOMBRE = ? AND DEPARTAMENTO = ? AND FECHA = ? AND TIPO_CONSUMO = ?";
                 $checkParams = [$nombre, $departamento, $fecha, $consumo];
                 $checkStmt = sqlsrv_query($conn, $checkSql, $checkParams);
@@ -86,9 +187,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         $alertMessage = "Ya existe una cancelación registrada para esta fecha y tipo de consumo.";
                         $alertType = "error";
                     } else {
+                        // -------------------------------------------------------------------
+                        // SECCIÓN: INSERT en tabla Cancelaciones
+                        // Inserta el registro con ESTATUS = 'EN PROCESO' para su posterior
+                        // revisión y aprobación por el área de DIRECCIÓN.
+                        // FECHA_CAPTURA almacena fecha y hora del servidor al momento del envío.
+                        // Todos los parámetros son marcadores de posición (?) — prevención SQL injection.
+                        // -------------------------------------------------------------------
                         // Insertar en la base de datos con el campo DESCRIPCION
-                        $sql = "INSERT INTO Cancelaciones 
-                        ([NOMBRE],[DEPARTAMENTO],[JEFE],[TIPO_CONSUMO],[FECHA],[CAUSA],[DESCRIPCION],[ESTATUS],[FECHA_CAPTURA]) 
+                        $sql = "INSERT INTO Cancelaciones
+                        ([NOMBRE],[DEPARTAMENTO],[JEFE],[TIPO_CONSUMO],[FECHA],[CAUSA],[DESCRIPCION],[ESTATUS],[FECHA_CAPTURA])
                         VALUES (?, ?, ?, ?, ?, ?, ?, 'EN PROCESO', ?)";
                         $params = [$nombre, $departamento, $jefe, $consumo, $fecha, $causa, $descripcion, $fechaActual . ' ' . $horaActual];
                         $stmt = sqlsrv_query($conn, $sql, $params);

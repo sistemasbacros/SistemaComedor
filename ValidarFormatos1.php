@@ -9,19 +9,11 @@ mb_internal_encoding('UTF-8');
 setlocale(LC_ALL, 'es_ES.UTF-8', 'spanish');
 date_default_timezone_set('America/Mexico_City');
 
-// Conexi車n a SQL Server
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionInfo = array(
-    "Database" => "Comedor",
-    "UID" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "ReturnDatesAsStrings" => true
-);
-
-$conn = sqlsrv_connect($serverName, $connectionInfo);
+// Conexión a SQL Server
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 if (!$conn) {
-    die("<div class='alert alert-danger'>Error de conexi車n a la base de datos</div>");
+    die("<div class='alert alert-danger'>Error de conexión a la base de datos</div>");
 }
 
 // Obtener filtro de estado desde GET

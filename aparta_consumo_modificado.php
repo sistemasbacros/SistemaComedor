@@ -1,26 +1,90 @@
 <?php
+/**
+ * @file aparta_consumo_modificado.php
+ * @brief Módulo para consultar y apartar consumos de comidas canceladas disponibles del día.
+ *
+ * @description
+ * Permite a empleados autenticados (vía sesión del menú principal) reclamar/apartar
+ * una comida de las cancelaciones aprobadas que no han sido asignadas en el día actual.
+ * El módulo opera en dos modos:
+ *
+ *   Modo integrado (GET ?integrated=true):
+ *     Verifica que el usuario tenga una sesión válida iniciada en el sistema principal
+ *     ($_SESSION['authenticated_from_login']) y construye el contexto de sesión local
+ *     ($_SESSION['usuario_apartar']) para el módulo.
+ *
+ *   Modo AJAX (GET ?action=...):
+ *     - get_cancelaciones_disponibles: Devuelve JSON con las comidas disponibles del día
+ *       o el apartado actual del usuario si ya reclamó uno.
+ *     - apartar_comida: Ejecuta la reserva de un consumo cancelado para el usuario activo
+ *       (UPDATE en tabla Cancelaciones), con validaciones de unicidad por usuario y día.
+ *
+ *   Modo HTML:
+ *     Renderiza la interfaz de tarjetas de consumos disponibles con Bootstrap 5 y SweetAlert2.
+ *     Las tarjetas muestran estado (DISPONIBLE / APARTADA / TU APARTADO) y permiten
+ *     confirmar el apartado mediante un modal de confirmación.
+ *
+ * ADVERTENCIA: Este archivo contiene credenciales de base de datos hardcodeadas.
+ * Debe migrarse para usar getComedorConnection() de config/database.php.
+ *
+ * @module Cancelaciones / Apartar Consumo
+ * @access Requiere sesión activa del menú principal ($_SESSION['authenticated_from_login'] = true)
+ *
+ * @dependencies
+ * - Librerías JS: Bootstrap 5.3.0, FontAwesome 6.4.0, SweetAlert2 11
+ * - Archivos PHP: Ninguno (conexión directa hardcodeada)
+ *
+ * @database
+ * - Tablas: Cancelaciones (BD Comedor)
+ * - Operaciones:
+ *     SELECT — Consulta cancelaciones del día con ESTATUS='APROBADO' y ESTATUS_APARTADO disponible
+ *     SELECT — Verificación de si el usuario ya apartó un consumo hoy
+ *     UPDATE — Asignación del consumo (ESTATUS_APARTADO='ASIGNADO', USUARIO_APARTA, FECHA_APARTADO)
+ *
+ * @session
+ * - $_SESSION['authenticated_from_login'] : bool   - Indica que la sesión del menú principal está activa
+ * - $_SESSION['username']                 : string - Usuario autenticado
+ * - $_SESSION['user_name']                : string - Nombre completo del usuario
+ * - $_SESSION['user_area']                : string - Área/departamento del usuario
+ * - $_SESSION['usuario_apartar']          : array  - Contexto local del módulo con nombre, usuario, area y flags
+ *
+ * @inputs
+ * - $_GET['integrated']        : string - 'true' para activar modo integrado con sesión del menú
+ * - $_GET['action']            : string - Acción AJAX: 'get_cancelaciones_disponibles' | 'apartar_comida'
+ * - $_POST['nombre_cancelacion'] : string - Nombre del empleado dueño de la cancelación a apartar
+ * - $_POST['tipo_consumo']       : string - Tipo de consumo (Desayuno / Comida)
+ * - $_POST['fecha_cancelacion']  : string - Fecha de la cancelación (YYYY-MM-DD o DD/MM/YYYY)
+ *
+ * @outputs
+ * - JSON: { success: bool, cancelaciones: array, info: { ya_aparto: bool } } para GET cancelaciones
+ * - JSON: { success: bool, message: string } para POST apartar
+ * - HTML renderizado con tarjetas de consumos disponibles y modal de confirmación
+ *
+ * @security
+ * - Validación de sesión activa antes de cualquier acción AJAX o renderizado
+ * - Verificación de unicidad: un solo apartado por usuario por día (SELECT COUNT antes de UPDATE)
+ * - Verificación de concurrencia: comprueba ESTATUS_APARTADO antes de ejecutar UPDATE
+ * - htmlspecialchars() aplicado en salida de datos de sesión al HTML
+ * - Credenciales de BD hardcodeadas (pendiente de migración a variables de entorno)
+ *
+ * @author Equipo Tecnología BacroCorp
+ * @version 1.0
+ * @since 2024
+ * @updated 2026-02-18
+ */
+
 // =============================================
 // APARTAR COMIDAS - VERSIÓN FINAL
 // =============================================
 
 session_start();
 
-// Configuración de conexión a la base de datos
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03", 
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
+require_once __DIR__ . '/config/database.php';
 
-// Función para obtener conexión
 function getConnection() {
-    global $serverName, $connectionOptions;
-    $conn = sqlsrv_connect($serverName, $connectionOptions);
+    $conn = getComedorConnection();
     if ($conn === false) {
-        die(json_encode(['success' => false, 'message' => 'Error de conexión a la base de datos: ' . print_r(sqlsrv_errors(), true)]));
+        die(json_encode(['success' => false, 'message' => 'Error de conexión a la base de datos.']));
     }
     return $conn;
 }
@@ -59,6 +123,20 @@ if ($integrated_mode) {
 // FUNCIONES PARA APARTAR COMIDAS
 // =============================================
 
+/**
+ * @brief Retorna en JSON las cancelaciones de comida disponibles para apartar en el día actual.
+ *
+ * Lógica de negocio:
+ *   - Verifica que el usuario tenga sesión activa en $_SESSION['usuario_apartar'].
+ *   - Comprueba si el usuario ya realizó un apartado hoy (ESTATUS_APARTADO = 'ASIGNADO').
+ *   - Si ya apartó: devuelve solo su propio apartado del día.
+ *   - Si no ha apartado: devuelve todas las cancelaciones del día con ESTATUS='APROBADO'
+ *     y ESTATUS_APARTADO IS NULL o 'DISPONIBLE'.
+ *   - Formatea las fechas (DateTime o string) y limpia el campo NOMBRE de prefijos textuales.
+ *   - Responde con Content-Type: application/json y termina la ejecución.
+ *
+ * @return void Emite JSON directamente al cliente y llama a exit
+ */
 function getCancelacionesDisponibles() {
     // Verificar sesión
     if (!isset($_SESSION['usuario_apartar']) || !$_SESSION['usuario_apartar']['logueado']) {
@@ -73,9 +151,15 @@ function getCancelacionesDisponibles() {
     
     $conn = getConnection();
     
-    // Primero, verificar si el usuario ya apartó un consumo hoy
-    $sqlVerificarUsuario = "SELECT COUNT(*) as ya_aparto 
-                           FROM Cancelaciones 
+    /* =========================================================
+     * CONSULTA: Verificar si el usuario ya realizó un apartado hoy
+     * Tablas: Cancelaciones
+     * Retorna: Conteo de filas con USUARIO_APARTA = usuario actual,
+     *          fecha de hoy y ESTATUS_APARTADO = 'ASIGNADO'.
+     * =========================================================
+     */
+    $sqlVerificarUsuario = "SELECT COUNT(*) as ya_aparto
+                           FROM Cancelaciones
                            WHERE USUARIO_APARTA = ?
                            AND CONVERT(DATE, FECHA) = CONVERT(DATE, GETDATE())
                            AND ESTATUS_APARTADO = 'ASIGNADO'";
@@ -92,7 +176,13 @@ function getCancelacionesDisponibles() {
     
     // Si ya apartó, mostrar solo su apartado
     if ($ya_aparto) {
-        $sql = "SELECT 
+        /* =========================================================
+         * CONSULTA: Apartado del día del usuario actual
+         * Tablas: Cancelaciones
+         * Retorna: Registro(s) que el usuario ya apartó hoy (ASIGNADO).
+         * =========================================================
+         */
+        $sql = "SELECT
                     NOMBRE,
                     DEPARTAMENTO,
                     JEFE,
@@ -104,7 +194,7 @@ function getCancelacionesDisponibles() {
                     USUARIO_APARTA,
                     FECHA_APARTADO,
                     DESCRIPCION
-                FROM Cancelaciones 
+                FROM Cancelaciones
                 WHERE USUARIO_APARTA = ?
                 AND CONVERT(DATE, FECHA) = CONVERT(DATE, GETDATE())
                 AND ESTATUS_APARTADO = 'ASIGNADO'
@@ -112,8 +202,14 @@ function getCancelacionesDisponibles() {
         
         $stmt = sqlsrv_query($conn, $sql, array($usuarioAparea));
     } else {
-        // Si no ha apartado, mostrar todas las disponibles
-        $sql = "SELECT 
+        /* =========================================================
+         * CONSULTA: Cancelaciones disponibles del día para apartar
+         * Tablas: Cancelaciones
+         * Retorna: Todas las cancelaciones aprobadas de hoy que no han sido
+         *          asignadas aún (ESTATUS_APARTADO IS NULL o 'DISPONIBLE').
+         * =========================================================
+         */
+        $sql = "SELECT
                     NOMBRE,
                     DEPARTAMENTO,
                     JEFE,
@@ -124,7 +220,7 @@ function getCancelacionesDisponibles() {
                     ESTATUS_APARTADO,
                     USUARIO_APARTA,
                     DESCRIPCION
-                FROM Cancelaciones 
+                FROM Cancelaciones
                 WHERE CONVERT(DATE, FECHA) = CONVERT(DATE, GETDATE())
                 AND ESTATUS = 'APROBADO'
                 AND (ESTATUS_APARTADO IS NULL OR ESTATUS_APARTADO = 'DISPONIBLE')
@@ -190,6 +286,20 @@ function getCancelacionesDisponibles() {
     exit;
 }
 
+/**
+ * @brief Procesa la solicitud de apartado de un consumo cancelado por el usuario activo.
+ *
+ * Recibe vía POST los datos de la cancelación a apartar. Realiza las siguientes validaciones
+ * antes de ejecutar el UPDATE:
+ *   1. Verifica que el usuario tenga sesión activa en $_SESSION['usuario_apartar'].
+ *   2. Valida que los campos nombre_cancelacion, tipo_consumo y fecha_cancelacion no estén vacíos.
+ *   3. Comprueba que el usuario no haya realizado ya un apartado hoy (unicidad diaria).
+ *   4. Verifica que la cancelación específica aún tenga ESTATUS_APARTADO != 'ASIGNADO'
+ *      (control de concurrencia).
+ *   5. Ejecuta UPDATE para marcar la cancelación como ASIGNADO con USUARIO_APARTA y FECHA_APARTADO.
+ *
+ * @return void Emite JSON directamente al cliente y llama a exit
+ */
 function apartarComida() {
     // Verificar sesión directamente desde la sesión iniciada
     if (!isset($_SESSION['usuario_apartar']) || !$_SESSION['usuario_apartar']['logueado']) {
@@ -219,9 +329,15 @@ function apartarComida() {
     // Asegurar formato de fecha correcto
     $fechaSQL = date('Y-m-d', strtotime(str_replace('/', '-', $fechaCancelacion)));
     
-    // Verificar si el usuario ya apartó un consumo hoy
-    $sqlVerificarUsuario = "SELECT COUNT(*) as ya_aparto 
-                           FROM Cancelaciones 
+    /* =========================================================
+     * CONSULTA: Verificar unicidad del apartado diario del usuario
+     * Tablas: Cancelaciones
+     * Opera en: apartarComida()
+     * Retorna: Conteo; si > 0, el usuario ya apartó hoy → rechazar solicitud.
+     * =========================================================
+     */
+    $sqlVerificarUsuario = "SELECT COUNT(*) as ya_aparto
+                           FROM Cancelaciones
                            WHERE USUARIO_APARTA = ?
                            AND CONVERT(DATE, FECHA) = CONVERT(DATE, GETDATE())
                            AND ESTATUS_APARTADO = 'ASIGNADO'";
@@ -238,10 +354,16 @@ function apartarComida() {
     }
     sqlsrv_free_stmt($stmtVerificarUsuario);
     
-    // Verificar que la comida todavía esté disponible
-    $sqlVerificar = "SELECT ESTATUS_APARTADO, USUARIO_APARTA FROM Cancelaciones 
-                     WHERE NOMBRE = ? 
-                     AND TIPO_CONSUMO = ? 
+    /* =========================================================
+     * CONSULTA: Verificar disponibilidad de la cancelación específica (control de concurrencia)
+     * Tablas: Cancelaciones
+     * Retorna: ESTATUS_APARTADO y USUARIO_APARTA del registro solicitado.
+     *          Si ESTATUS_APARTADO = 'ASIGNADO', la comida ya fue tomada por otro usuario.
+     * =========================================================
+     */
+    $sqlVerificar = "SELECT ESTATUS_APARTADO, USUARIO_APARTA FROM Cancelaciones
+                     WHERE NOMBRE = ?
+                     AND TIPO_CONSUMO = ?
                      AND CONVERT(DATE, FECHA) = ?";
     
     $paramsVerificar = array($nombreCancelacion, $tipoConsumo, $fechaSQL);
@@ -264,14 +386,21 @@ function apartarComida() {
     
     sqlsrv_free_stmt($stmtVerificar);
     
-    // Actualizar con el formato correcto para USUARIO_APARTA
-    $sql = "UPDATE Cancelaciones 
+    /* =========================================================
+     * ACTUALIZACIÓN: Asignar la cancelación al usuario que la aparta
+     * Tablas: Cancelaciones
+     * Operación: UPDATE — Marca ESTATUS_APARTADO = 'ASIGNADO', registra USUARIO_APARTA,
+     *            FECHA_APARTADO = GETDATE() y ESTATUS_SOLICITUD = 'APROBADA'.
+     * Condición: Coincidencia exacta por NOMBRE, TIPO_CONSUMO y fecha (CONVERT(DATE, FECHA)).
+     * =========================================================
+     */
+    $sql = "UPDATE Cancelaciones
             SET ESTATUS_APARTADO = 'ASIGNADO',
                 USUARIO_APARTA = ?,
                 FECHA_APARTADO = GETDATE(),
                 ESTATUS_SOLICITUD = 'APROBADA'
-            WHERE NOMBRE = ? 
-            AND TIPO_CONSUMO = ? 
+            WHERE NOMBRE = ?
+            AND TIPO_CONSUMO = ?
             AND CONVERT(DATE, FECHA) = ?";
     
     $params = array($usuarioAparea, $nombreCancelacion, $tipoConsumo, $fechaSQL);
@@ -300,7 +429,15 @@ function apartarComida() {
     exit;
 }
 
-// Manejo de acciones AJAX
+/* =========================================================
+ * DISPATCHER DE ACCIONES AJAX
+ * Determina si la solicitud es AJAX mediante el parámetro GET 'action'
+ * y despacha a la función PHP correspondiente.
+ * Acciones soportadas:
+ *   - get_cancelaciones_disponibles → getCancelacionesDisponibles()
+ *   - apartar_comida                → apartarComida()
+ * =========================================================
+ */
 if (isset($_GET['action'])) {
     switch ($_GET['action']) {
         case 'get_cancelaciones_disponibles':

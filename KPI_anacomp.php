@@ -1,3 +1,65 @@
+<!--
+ @file KPI_anacomp.php
+ @brief Matriz de indicadores de evaluación para Analistas de Compras de BacroCorp.
+
+ @description
+ Este módulo implementa una herramienta interactiva de evaluación de desempeño para el
+ equipo de Analistas de Compras. Permite registrar calificaciones en seis criterios clave
+ (Asistencia, Requisición, Cuadro comparativo de proveedores, Órdenes de compra,
+ Evaluación de proveedores y Reportes de compras semanales), calcular porcentajes de
+ cumplimiento respecto a metas predefinidas y visualizar los resultados comparativos
+ en un gráfico de barras ECharts. Los datos se pueden exportar a Excel.
+
+ Flujo principal:
+   1. El usuario ingresa el nombre e ID del empleado a evaluar y una fecha.
+   2. Pulsa "Agregar Columnas" para insertar dinámicamente columnas de evaluación en la tabla.
+   3. Completa los campos de número de formatos logrados por criterio.
+   4. Las funciones input1–input6 / nueva1–nueva6 calculan el porcentaje en tiempo real.
+   5. input7 / nueva6 calculan el promedio total y actualizan el gráfico ECharts.
+   6. El usuario puede exportar la tabla final usando "Exporta tu tabla a excel".
+   7. Al pulsar "Guardar evaluaciones" se envía el formulario POST al mismo archivo PHP,
+      que conecta a la base de datos KPI para persistencia (actualmente comentado).
+
+ @module Módulo de KPIs y Evaluación de Desempeño
+ @access DIRECCIÓN | RECURSOS HUMANOS | ADMINISTRADOR
+
+ @dependencies
+ - JS CDN: jQuery 3.5.1, DataTables 1.13.4, DataTables Bootstrap, ECharts 5.4.2, XLSX.js 0.15.1
+ - PHP: sqlsrv (extensión Microsoft SQL Server)
+
+ @database
+ - Base de datos: KPI (DESAROLLO-BACRO\SQLEXPRESS)
+ - Tablas: (conexión establecida; queries de inserción/selección comentados)
+ - Patrones SQL: SELECT plano; lógica de negocio en JavaScript del lado cliente
+
+ @analytics
+ - Tipo de visualización: Gráfico de barras ECharts (calificaciones por analista)
+ - Métricas calculadas:
+     * Porcentaje de cumplimiento por criterio (logrado / meta * 100)
+     * Promedio total de los 6 criterios por analista
+ - Período de análisis: Definido por el campo "Birthday" (fecha de evaluación)
+
+ @inputs
+ - Campos HTML: fname (nombre del evaluado), fname1 (ID empleado), fecha (fecha evaluación)
+ - Botones: "Agregar Columnas" (CreateTable), "Guardar evaluaciones" (POST), "Exporta a Excel"
+ - $_POST campos: fname, fname1, fecha (procesados en bloque PHP al final)
+
+ @outputs
+ - Tabla DataTables interactiva con criterios y calificaciones por analista
+ - Párrafos dinámicos con calificación final por persona
+ - Gráfico de barras ECharts comparativo de calificaciones
+ - Exportación a Excel via XLSX.js o método tableToExcel
+
+ @security
+ - Formulario POST con action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>"
+ - Función test_input() para sanitización de entradas: trim, stripslashes, htmlspecialchars
+ - NOTA: Credenciales de base de datos hardcodeadas (pendiente migrar a .env)
+
+ @author Equipo Tecnología BacroCorp
+ @version 1.0
+ @since 2024
+ @updated 2026-02-18
+-->
 <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
 <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
 <link href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css" rel="stylesheet">
@@ -1412,36 +1474,78 @@ C8.push('Total meta','100%')
  
  
  
+/**
+ * @function upperCase
+ * @description Calcula el porcentaje de cumplimiento del criterio "Asistencia" para la
+ *   primera columna de evaluación (Evaluado 1). Divide el valor ingresado entre la meta
+ *   definida en la celda mytd y muestra el resultado en porcentaje.
+ * @returns {void}
+ */
 function upperCase() {
   <!-- const x = document.getElementById("row-1-age"); -->
   <!-- x.value = x.value.toUpperCase(); -->
   document.getElementById("row-1-position").value = Math.round((parseFloat(document.getElementById("row-1-age").value)*100)/ parseFloat(document.getElementById("mytd").innerText)) +'%'
 }
 
+/**
+ * @function upperCase2
+ * @description Calcula el porcentaje de cumplimiento del criterio "Cuadro comparativo
+ *   de proveedores" para la primera columna de evaluación. Meta referenciada en mytd2.
+ * @returns {void}
+ */
 function upperCase2() {
 document.getElementById("row-1-position2").value = Math.round((parseFloat(document.getElementById("row-1-age2").value)*100)/ parseFloat(document.getElementById("mytd2").innerText)) +'%'
 }
 
+/**
+ * @function upperCase3
+ * @description Calcula el porcentaje de cumplimiento del criterio "Evaluación de
+ *   proveedores" para la primera columna de evaluación. Meta referenciada en mytd4.
+ * @returns {void}
+ */
 function upperCase3() {
 document.getElementById("row-1-position4").value = Math.round((parseFloat(document.getElementById("row-1-age4").value)*100)/ parseFloat(document.getElementById("mytd4").innerText)) +'%'
 }
 
-
+/**
+ * @function upperCase4
+ * @description Calcula el porcentaje de cumplimiento del criterio "Órdenes de compra"
+ *   para la primera columna de evaluación. Meta referenciada en mytd3.
+ * @returns {void}
+ */
 function upperCase4() {
 document.getElementById("row-1-position3").value = Math.round((parseFloat(document.getElementById("row-1-age3").value)*100)/ parseFloat(document.getElementById("mytd3").innerText)) +'%'
 }
 
-
+/**
+ * @function upperCase5
+ * @description Calcula el porcentaje de cumplimiento del criterio "Reportes de compras
+ *   semanal" para la primera columna de evaluación. Meta referenciada en mytd5.
+ * @returns {void}
+ */
 function upperCase5() {
 document.getElementById("row-1-position5").value = Math.round((parseFloat(document.getElementById("row-1-age5").value)*100)/ parseFloat(document.getElementById("mytd5").innerText)) +'%'
 }
 
-
+/**
+ * @function upperCase6
+ * @description Calcula el porcentaje de cumplimiento del criterio "Requisición" para
+ *   la primera columna de evaluación. Meta referenciada en mytd1.
+ * @returns {void}
+ */
 function upperCase6() {
 document.getElementById("row-1-position1").value = Math.round((parseFloat(document.getElementById("row-1-age1").value)*100)/ parseFloat(document.getElementById("mytd1").innerText)) +'%'
 
 }
 
+/**
+ * @function upperCase7
+ * @description Calcula el promedio total de los 6 criterios de evaluación (calificación
+ *   global) para la primera persona evaluada. Suma los 6 porcentajes, divide entre 6,
+ *   redondea al entero más cercano y actualiza tanto el campo row-1-positionT como el
+ *   elemento por1 (visible en pantalla como indicador de calificación final).
+ * @returns {void}
+ */
 function upperCase7() {
 <!-- document.getElementById("row-1-position1").value = Math.round((parseFloat(document.getElementById("row-1-age1").value)*100)/ parseFloat(document.getElementById("mytd1").innerText)) +'%' -->
 
@@ -1455,18 +1559,36 @@ document.getElementById("por1").innerHTML = (Math.round((parseFloat(document.get
 
 
 ////// funciones input 1
+/**
+ * @function input1
+ * @description Calcula el porcentaje de cumplimiento de "Asistencia" para la segunda
+ *   columna de evaluación (Evaluado 2). Lee el campo "segunda" y la meta de mytd.
+ * @returns {void}
+ */
 function input1() {
 document.getElementById("tercera").value = Math.round((parseFloat(document.getElementById("segunda").value)*100)/ parseFloat(document.getElementById("mytd").innerText)) +'%'
 }
 ////// funciones input 1
 
 ///// funciones input 2
+/**
+ * @function input2
+ * @description Calcula el porcentaje de cumplimiento de "Cuadro comparativo de
+ *   proveedores" para la segunda columna de evaluación. Lee "segunda2" y la meta de mytd2.
+ * @returns {void}
+ */
 function input2() {
 document.getElementById("tercer2").value = Math.round((parseFloat(document.getElementById("segunda2").value)*100)/ parseFloat(document.getElementById("mytd2").innerText)) +'%'
 }
 ///// funciones input 2
 
 ///// funciones input 3
+/**
+ * @function input3
+ * @description Calcula el porcentaje de cumplimiento de "Evaluación de proveedores"
+ *   para la segunda columna de evaluación. Lee "segunda4" y la meta de mytd4.
+ * @returns {void}
+ */
 function input3() {
 ///alert('Hola')
 //document.getElementById("tercer4").value =  "Hola"
@@ -1476,6 +1598,12 @@ document.getElementById("tercer4").value = Math.round((parseFloat(document.getEl
 
 
 ///// funciones input 4
+/**
+ * @function input4
+ * @description Calcula el porcentaje de cumplimiento de "Órdenes de compra" para la
+ *   segunda columna de evaluación. Lee "segunda3" y la meta de mytd3.
+ * @returns {void}
+ */
 function input4() {
 ///alert('Hola')
 //document.getElementById("tercer4").value =  "Hola"
@@ -1485,6 +1613,12 @@ document.getElementById("tercer3").value = Math.round((parseFloat(document.getEl
 
 
 ///// funciones input 5
+/**
+ * @function input5
+ * @description Calcula el porcentaje de cumplimiento de "Reportes de compras semanal"
+ *   para la segunda columna de evaluación. Lee "segund5" y la meta de mytd5.
+ * @returns {void}
+ */
 function input5() {
 ///alert('Hola')
 //document.getElementById("tercer4").value =  "Hola"
@@ -1493,6 +1627,12 @@ document.getElementById("tercer5").value = Math.round((parseFloat(document.getEl
 ///// funciones input 5
 
 ///// funciones input 6
+/**
+ * @function input6
+ * @description Calcula el porcentaje de cumplimiento de "Requisición" para la segunda
+ *   columna de evaluación. Lee "segunda1" y la meta de mytd1.
+ * @returns {void}
+ */
 function input6() {
 ///alert('Hola')
 //document.getElementById("tercer4").value =  "Hola"
@@ -1500,17 +1640,31 @@ document.getElementById("tercer1").value = Math.round((parseFloat(document.getEl
 }
 ///// funciones input 7
 
+/**
+ * @function input7
+ * @description Calcula el promedio total de los 6 criterios para la segunda persona
+ *   evaluada (Evaluado 2). Suma los 6 porcentajes tercer1–tercer5 y tercera, divide
+ *   entre 6 y actualiza el campo row-1-positionT1234 y el elemento por2.
+ * @returns {void}
+ */
 function input7() {
-document.getElementById("row-1-positionT1234").value = Math.round((parseFloat(document.getElementById("tercer1").value.replace("%", ""))+parseFloat(document.getElementById("tercer5").value.replace("%", ""))+parseFloat(document.getElementById("tercer3").value.replace("%", ""))+parseFloat(document.getElementById("tercer4").value.replace("%", ""))+parseFloat(document.getElementById("tercer2").value.replace("%", ""))+parseFloat(document.getElementById("tercera").value.replace("%", "")))/6)+'%' 
+document.getElementById("row-1-positionT1234").value = Math.round((parseFloat(document.getElementById("tercer1").value.replace("%", ""))+parseFloat(document.getElementById("tercer5").value.replace("%", ""))+parseFloat(document.getElementById("tercer3").value.replace("%", ""))+parseFloat(document.getElementById("tercer4").value.replace("%", ""))+parseFloat(document.getElementById("tercer2").value.replace("%", ""))+parseFloat(document.getElementById("tercera").value.replace("%", "")))/6)+'%'
 
-document.getElementById("por2").innerHTML = Math.round((parseFloat(document.getElementById("tercer1").value.replace("%", ""))+parseFloat(document.getElementById("tercer5").value.replace("%", ""))+parseFloat(document.getElementById("tercer3").value.replace("%", ""))+parseFloat(document.getElementById("tercer4").value.replace("%", ""))+parseFloat(document.getElementById("tercer2").value.replace("%", ""))+parseFloat(document.getElementById("tercera").value.replace("%", "")))/6)+'%' 
+document.getElementById("por2").innerHTML = Math.round((parseFloat(document.getElementById("tercer1").value.replace("%", ""))+parseFloat(document.getElementById("tercer5").value.replace("%", ""))+parseFloat(document.getElementById("tercer3").value.replace("%", ""))+parseFloat(document.getElementById("tercer4").value.replace("%", ""))+parseFloat(document.getElementById("tercer2").value.replace("%", ""))+parseFloat(document.getElementById("tercera").value.replace("%", "")))/6)+'%'
 
 }
 ///// funciones input 7
 ////(Math.round((parseFloat(document.getElementById("row-1-position").value.replace("%", "")) +parseFloat(document.getElementById("row-1-position2").value.replace("%", ""))+parseFloat(document.getElementById("row-1-position4").value.replace("%", ""))+parseFloat(document.getElementById("row-1-position3").value.replace("%", ""))+parseFloat(document.getElementById("row-1-position5").value.replace("%", ""))+parseFloat(document.getElementById("row-1-position1").value.replace("%", "")))/6))+'%' 
 
 
-////////////////////////////Funciones nuevos campos 
+////////////////////////////Funciones nuevos campos
+/**
+ * @function nueva1
+ * @description Calcula el porcentaje de cumplimiento de "Asistencia" para una columna
+ *   de evaluación agregada dinámicamente. Usa el nombre del evaluado (fname) como sufijo
+ *   para identificar los elementos de input (p1{nombre}) y resultado (pT1{nombre}).
+ * @returns {void}
+ */
 function nueva1() {
 var x6 = document.getElementById("fname").value;
 ///alert(x6)
@@ -1518,26 +1672,59 @@ document.getElementById("pT1"+x6).value = Math.round((parseFloat(document.getEle
 }
 
 ////// Función 2
+/**
+ * @function nueva2
+ * @description Calcula el porcentaje de cumplimiento de "Cuadro comparativo de proveedores"
+ *   para una columna dinámica. Identifica los campos mediante el nombre del evaluado (fname).
+ * @returns {void}
+ */
 function nueva2() {
 var x6 = document.getElementById("fname").value;
 document.getElementById("pT2"+x6).value = Math.round((parseFloat(document.getElementById("p2"+x6).value)*100)/ parseFloat(document.getElementById("mytd2").innerText)) +'%'
 }
 
+/**
+ * @function nueva3
+ * @description Calcula el porcentaje de cumplimiento de "Evaluación de proveedores"
+ *   para una columna dinámica. Meta referenciada en mytd4.
+ * @returns {void}
+ */
 function nueva3() {
 var x6 = document.getElementById("fname").value;
 document.getElementById("pT3"+x6).value = Math.round((parseFloat(document.getElementById("p3"+x6).value)*100)/ parseFloat(document.getElementById("mytd4").innerText)) +'%'
 }
 
+/**
+ * @function nueva4
+ * @description Calcula el porcentaje de cumplimiento de "Órdenes de compra" para
+ *   una columna dinámica. Meta referenciada en mytd3.
+ * @returns {void}
+ */
 function nueva4() {
 var x6 = document.getElementById("fname").value;
 document.getElementById("pT4"+x6).value = Math.round((parseFloat(document.getElementById("p4"+x6).value)*100)/ parseFloat(document.getElementById("mytd3").innerText)) +'%'
 }
 
+/**
+ * @function nueva5
+ * @description Calcula el porcentaje de cumplimiento de "Reportes de compras semanal"
+ *   para una columna dinámica. Meta referenciada en mytd5.
+ * @returns {void}
+ */
 function nueva5() {
 var x6 = document.getElementById("fname").value;
 document.getElementById("pT5"+x6).value = Math.round((parseFloat(document.getElementById("p5"+x6).value)*100)/ parseFloat(document.getElementById("mytd5").innerText)) +'%'
 }
 
+/**
+ * @function nueva6
+ * @description Calcula el porcentaje de cumplimiento de "Requisición" para una columna
+ *   dinámica, luego calcula el promedio total de los 6 criterios, actualiza los campos
+ *   pT7 (promedio), pT8 / p8 (meta 100%), registra la calificación en el array de datos
+ *   global, agrega un párrafo visible con el resultado y llama a myFunctionG() para
+ *   redibujar el gráfico ECharts con la nueva persona incluida.
+ * @returns {void}
+ */
 function nueva6() {
 var x6 = document.getElementById("fname").value;
 document.getElementById("pT6"+x6).value = Math.round((parseFloat(document.getElementById("p6"+x6).value)*100)/ parseFloat(document.getElementById("mytd1").innerText)) +'%'
@@ -1619,6 +1806,17 @@ myFunctionG();
   
 
   
+  /**
+   * @function myFunctionG
+   * @description Renderiza o actualiza el gráfico de barras ECharts en el contenedor
+   *   #container con las calificaciones comparativas de todos los analistas evaluados
+   *   hasta el momento. Usa los arrays globales `nombre` (eje X, nombres de evaluados)
+   *   y `data123` (eje Y, porcentaje promedio de cada analista). Formatea las etiquetas
+   *   de valor con signo de porcentaje y el tooltip muestra el formato "{b}:{c}%".
+   *   Se registra un listener de resize para ajuste responsive.
+   * @param {void}
+   * @returns {void}
+   */
   function myFunctionG() {
   //////////////variables  gráfica
     <!-- alert(document.getElementById("row-1-positionT1234").value) -->
@@ -1699,6 +1897,17 @@ myFunctionG();
 
 <!-- } -->
 
+/**
+ * @function CreateTable
+ * @description Agrega dinámicamente dos pares de columnas a la tabla DataTables #example
+ *   para el evaluado cuyo nombre se encuentra en el campo fname. La primera columna
+ *   recibe el encabezado "No de Formatos que se tienen" con inputs de captura (p1..p8 + nombre).
+ *   La segunda columna recibe el nombre del evaluado como encabezado y contiene inputs
+ *   de porcentaje calculado (pT1..pT8 + nombre) de solo lectura. Itera sobre todas las
+ *   filas de la tabla (rows 1..N) para insertar los <td> con los campos correspondientes.
+ *   Los inputs de captura invocan las funciones nueva1()–nueva6() mediante onchange.
+ * @returns {void}
+ */
 function CreateTable() {
 
 
@@ -1834,6 +2043,18 @@ function CreateTable() {
     <!-- table.appendChild(tr); -->
 }
 
+/**
+ * @function ExportToExcel
+ * @description Reconstruye la DataTable #example con los datos completos almacenados en
+ *   los arrays C, C1–C8 (encabezados y filas de todos los evaluados) antes de ejecutar
+ *   la exportación. Primero destruye y vacía la tabla existente, la recrea con DataTables
+ *   usando las columnas dinámicas en C y los datos en C1–C8, luego delega la descarga al
+ *   método tableToExcel externo. El parámetro 'type' es 'xlsx' por convención.
+ * @param {string} type - Tipo de archivo de salida (ej. 'xlsx')
+ * @param {string} [fn] - Nombre de archivo de salida (opcional)
+ * @param {boolean} [dl] - Si true retorna base64 en lugar de descargar archivo
+ * @returns {void}
+ */
 function ExportToExcel(type, fn, dl) {
 $('#example').DataTable().destroy();
 $('#example').empty();
@@ -1858,6 +2079,17 @@ new DataTable('#example', {
     }
 	
 	
+/**
+ * @function tableToExcel
+ * @description IIFE (Immediately Invoked Function Expression) que retorna una función de
+ *   exportación a Excel usando el protocolo data URI con MIME type vnd.ms-excel.
+ *   Serializa el HTML de la tabla indicada dentro de una plantilla de libro Excel XML,
+ *   codifica en base64 y asigna a window.location.href para disparar la descarga.
+ *   Nota: Funciona en navegadores que soporten data URIs con charset UTF-8.
+ * @param {string|HTMLElement} table - ID de la tabla HTML o referencia al elemento DOM
+ * @param {string} [name] - Nombre de la hoja de trabajo dentro del libro Excel
+ * @returns {void}
+ */
 	var tableToExcel = (function() {
   var uri = 'data:application/vnd.ms-excel;base64,'
     , template = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>{worksheet}</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--><meta http-equiv="content-type" content="text/plain; charset=UTF-8"/></head><body><table>{table}</table></body></html>'
@@ -1872,6 +2104,17 @@ new DataTable('#example', {
 	
 	
 	
+/**
+ * @function exportTableToExcel
+ * @description Exporta una tabla HTML a un archivo .xls creando un enlace de descarga
+ *   dinámico con data URI de tipo application/vnd.ms-excel. Compatible con Internet
+ *   Explorer (usando msSaveOrOpenBlob) y navegadores modernos. El HTML de la tabla se
+ *   codifica en la URL reemplazando espacios por %20. El archivo se nombra con la
+ *   extensión .xls o "excel_data.xls" por defecto.
+ * @param {string} tableID - ID del elemento de tabla HTML a exportar
+ * @param {string} [filename=''] - Nombre del archivo de salida sin extensión
+ * @returns {void}
+ */
 	function exportTableToExcel(tableID, filename = ''){
     var downloadLink;
     var dataType = 'application/vnd.ms-excel';
@@ -1910,6 +2153,17 @@ new DataTable('#example', {
   </script>
 
 <?php
+/**
+ * Bloque PHP de procesamiento del formulario de evaluación.
+ *
+ * Recibe el envío POST del formulario (acción sobre sí mismo). Actualmente los campos
+ * $_POST["name"], $_POST["email"] etc. están comentados. Establece conexión a la base
+ * de datos KPI en el servidor DESAROLLO-BACRO\SQLEXPRESS.
+ * Las sentencias de INSERT e SELECT están comentadas; solo verifica la conexión.
+ *
+ * NOTA DE MIGRACIÓN PENDIENTE: Las credenciales de conexión están hardcodeadas.
+ * Deben migrarse a config/database.php usando las variables de entorno del archivo .env.
+ */
 
 $pedido = $name = $email = $gender = $comment = $website = "";
 
@@ -1940,33 +2194,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 ////////////////// Update
 
 ////////////////// Insert
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"KPI", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
-if( $conn ) {
-     echo "Conexión establecida.<br />";
-}else{
-     echo "Conexión no se pudo establecer.<br />";
-     die( print_r( sqlsrv_errors(), true));
+require_once __DIR__ . '/config/database.php';
+$conn = getKpiConnection();
+if (!$conn) {
+    die('Error de conexión a la base de datos KPI.');
 }
-
-// $sql = "Insert into Usuarios (Usuario,Contrasena,Area) Values ('$name','$email','TI')";
-// $stmt = sqlsrv_query( $conn, $sql );
-// if( $stmt === false) {
-    // die( print_r( sqlsrv_errors(), true) );
-// }
-
-// // while( $row = sqlsrv_fetch_array( $stmt, SQLSRV_FETCH_ASSOC) ) {
-      // // echo $row['Usuario'].", ".$row['Contrasena']."<br />";
-// // }
-
-// sqlsrv_free_stmt( $stmt);
-
-////////////////// Select
-
-// $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02");
-// $conn = sqlsrv_connect( $serverName, $connectionInfo);
 
 // if( $conn ) {
      // echo "Conexión establecida.<br />";
@@ -1990,6 +2222,18 @@ if( $conn ) {
 
 }
 
+/**
+ * Sanitiza y limpia una entrada de formulario.
+ *
+ * Aplica tres transformaciones secuenciales:
+ *   1. trim()             — Elimina espacios al inicio y al final.
+ *   2. stripslashes()     — Elimina barras invertidas (protección contra magic quotes).
+ *   3. htmlspecialchars() — Convierte caracteres especiales HTML a entidades para
+ *                           prevenir ataques XSS.
+ *
+ * @param string $data Cadena de texto proveniente de un campo de formulario.
+ * @return string Cadena sanitizada lista para uso seguro.
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);

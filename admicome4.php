@@ -115,35 +115,7 @@ if (!$acceso_completo) {
 // CONEXIÓN A BASE DE DATOS Y CONSULTAS DEL DASHBOARD
 // ==================================================
 
-// Configuración de conexión a la base de datos principal
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
-
-// Configuración de conexión a Contpaq i Comedor - Alquimista
-$serverNameContpaq = "WIN-44O80L37Q7M\COMERCIAL";
-$connectionOptionsContpaq = array(
-    "Database" => "ALQUIMISTA2024",
-    "Uid" => "sa",
-    "PWD" => "Administrador1*",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
-
-// NUEVA CONFIGURACIÓN: Conexión a Contpaq i Comedor - BASENUEVA
-$serverNameBaseNueva = "WIN-44O80L37Q7M\COMERCIAL"; // Mismo servidor
-$connectionOptionsBaseNueva = array(
-    "Database" => "BASENUEVA", // Base de datos diferente
-    "Uid" => "sa",
-    "PWD" => "Administrador1*",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
+require_once __DIR__ . '/config/database.php';
 
 // // Obtener parámetros de fecha del request awquiii
 // $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d');
@@ -275,7 +247,7 @@ $total_exentos_comidas_desde_2026 = 0;
 
 try {
     // Conexión a la base de datos principal
-    $conn = sqlsrv_connect($serverName, $connectionOptions);
+    $conn = getComedorConnection();
     
     if ($conn !== false) {
         // Consulta para total de usuarios en el periodo (EXCLUYENDO EXENTOS)
@@ -831,7 +803,7 @@ try {
     $params_contpaq = array($fecha_inicio_contpaq, $fecha_fin_contpaq);
     
     // CONEXIÓN Y CONSULTA A ALQUIMISTA2024
-    $connAlquimista = sqlsrv_connect($serverNameContpaq, $connectionOptionsContpaq);
+    $connAlquimista = getAlquimistaConnection();
     
     if ($connAlquimista !== false) {
         $stmt_alquimista = sqlsrv_query($connAlquimista, $sql_alquimista, $params_contpaq);
@@ -847,7 +819,7 @@ try {
     }
     
     // CONEXIÓN Y CONSULTA A BASENUEVA
-    $connBaseNueva = sqlsrv_connect($serverNameBaseNueva, $connectionOptionsBaseNueva);
+    $connBaseNueva = getBaseNuevaConnection();
     
     if ($connBaseNueva !== false) {
         $stmt_basenueva = sqlsrv_query($connBaseNueva, $sql_basenueva, $params_contpaq);

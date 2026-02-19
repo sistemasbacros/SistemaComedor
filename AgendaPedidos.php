@@ -1,11 +1,66 @@
 <?php
+/**
+ * @file AgendaPedidos.php
+ * @brief Consulta de consumos semanales del empleado con tabla y filtro por fecha y número de empleado.
+ *
+ * @description
+ * Módulo de consulta que permite a cualquier usuario verificar los pedidos registrados
+ * en la semana seleccionada. Ejecuta dos consultas SQL al inicio de la carga de página:
+ *   1. Una consulta con PIVOT que agrega los totales de Desayuno/Comida por día de semana
+ *      y semana (Fecha), utilizada para alimentar gráficos o estadísticas visuales.
+ *   2. Una consulta de detalle que lista todos los empleados con sus elecciones por día
+ *      (Lunes–Viernes), cruzando el catálogo de empleados con los pedidos registrados.
+ * Los resultados se pasan al frontend (JavaScript) mediante json_encode y se filtran
+ * del lado del cliente por la fecha y el número de empleado ingresados en el formulario.
+ * La tabla resultante se renderiza con DataTables.
+ *
+ * ADVERTENCIA: Este archivo contiene credenciales de base de datos hardcodeadas.
+ * Debe migrarse para usar getComedorConnection() de config/database.php.
+ *
+ * @module Agenda / Consulta de Pedidos
+ * @access Acceso público (sin validación de sesión activa)
+ *
+ * @dependencies
+ * - Librerías JS: jQuery 1.11.3, DataTables 1.13.4, Bootstrap 5.3.0, xlsx 0.15.1
+ * - Archivos PHP: Ninguno (conexión directa hardcodeada)
+ *
+ * @database
+ * - Tablas: PedidosComida, Catalogo_EmpArea (BD Comedor)
+ * - Operaciones: SELECT (PIVOT para agregados semanales, JOIN para detalle por empleado)
+ *
+ * @session
+ * - No utiliza variables de sesión en esta versión
+ *
+ * @inputs
+ * - $_GET['fec'] : string - Fecha de inicio de semana seleccionada (formato YYYY-MM-DD), filtro JS
+ * - $_GET['emp'] : string - Número de empleado a consultar, filtro JS
+ *
+ * @outputs
+ * - HTML renderizado con formulario de búsqueda y tabla DataTable filtrada por cliente
+ *
+ * @security
+ * - Credenciales hardcodeadas (pendiente de migración a variables de entorno)
+ * - La función test_input() aplica trim, stripslashes y htmlspecialchars a entradas de usuario
+ *
+ * @author Equipo Tecnología BacroCorp
+ * @version 1.0
+ * @since 2024
+ * @updated 2026-02-18
+ */
+
 $pedido = $name = $email = $gender = $comment = $website = "";
 
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
-//////////////////////////////////////////////////Prueba nuevo query
+/* =========================================================
+ * CONSULTA 1: Agregado semanal con PIVOT — totales de Desayuno/Comida por día
+ * Tablas: PedidosComida
+ * Retorna: Por cada Fecha de semana, la suma de Desayunos (D*) y Comidas (C*)
+ *          para Lunes, Martes, Miércoles, Jueves y Viernes usando UNPIVOT + PIVOT.
+ * Propósito: Alimentar arrays PHP que el frontend usa para visualización agregada.
+ * =========================================================
+ */
 $sql = "Select Fecha,
 Sum(CLunes) as CLunes,Sum(DLunes) as DLunes,
 Sum(CMartes) as CMartes,Sum(DMartes) as DMartes,
@@ -48,6 +103,14 @@ PIVOT
 ) AS PivotTable ) as M
 Group by Fecha";
 
+/* =========================================================
+ * CONSULTA 2: Detalle de pedidos por empleado para la semana
+ * Tablas: PedidosComida, Catalogo_EmpArea
+ * Retorna: Por cada empleado registrado en el catálogo, su elección de comida
+ *          (Desayuno/Comida/vacío) para cada día Lunes–Viernes en todas las fechas.
+ * Operación: LEFT JOIN para incluir empleados sin pedidos (mostrando vacíos con ISNULL).
+ * =========================================================
+ */
 $sql1 = "Select Fecha,c.Id_Empleado, Nombre, ISNULL(Lunes, '') as Lunes, ISNULL(Martes, '') as Martes, ISNULL(Miercoles, '') as Miercoles
 ,ISNULL(Jueves, '') as Jueves,ISNULL(Viernes, '')  as Viernes
 from (Select Id_Empleado,Nombre,Area from [dbo].[Catalogo_EmpArea]) as a
@@ -62,13 +125,13 @@ if( $stmt === false) {
     die( print_r( sqlsrv_errors(), true) );
 }
 
-/////////////////// Variables dias 
+/* Arrays para resultados de la Consulta 1 (totales PIVOT por semana) */
 $array_tot1 = [];
 $array_tot2 = [];
 $array_tot3 = [];
 $array_tot4 = [];
 
-/////////////////////////// Variables arreglos querys nuevos.
+/* Arrays para columnas pivoteadas: Fecha de semana + C/D (Comida/Desayuno) por cada día */
 $array_Q1 = [];
 $array_Q2 = [];
 $array_Q3 = [];
@@ -81,6 +144,7 @@ $array_Q9 = [];
 $array_Q10 = [];
 $array_Q11 = [];
 
+/* Iterar resultados de Consulta 1 (PIVOT): poblar arrays por columna para uso en JS */
 while( $row = sqlsrv_fetch_array( $stmt, SQLSRV_FETCH_ASSOC) ) {
     array_push($array_Q1,$row['Fecha']);
     array_push($array_Q2,$row['CLunes']);
@@ -95,7 +159,7 @@ while( $row = sqlsrv_fetch_array( $stmt, SQLSRV_FETCH_ASSOC) ) {
     array_push($array_Q11,$row['DViernes']);
 }
 
-////////////////////////////////////// while query tabla
+/* Arrays para resultados de Consulta 2 (detalle de pedidos por empleado para la tabla) */
 $FechaT = [];
 $Id_EmpleadoT = [];
 $NombreT = [];
@@ -105,6 +169,7 @@ $MiercolesT = [];
 $JuevesT = [];
 $ViernesT = [];
 
+/* Iterar resultados de Consulta 2: poblar arrays de detalle de empleados para DataTable */
 while( $row = sqlsrv_fetch_array( $stmt1, SQLSRV_FETCH_ASSOC) ) {
     array_push($FechaT,$row['Fecha']);
     array_push($Id_EmpleadoT,$row['Id_Empleado']);
@@ -119,6 +184,16 @@ while( $row = sqlsrv_fetch_array( $stmt1, SQLSRV_FETCH_ASSOC) ) {
 sqlsrv_free_stmt( $stmt);
 sqlsrv_free_stmt( $stmt1);
 
+/**
+ * @brief Sanitiza una cadena de texto para su uso seguro en HTML.
+ *
+ * Aplica secuencialmente: eliminación de espacios extremos (trim),
+ * eliminación de barras de escape (stripslashes) y conversión de
+ * caracteres especiales a entidades HTML (htmlspecialchars).
+ *
+ * @param string $data Cadena de texto a sanitizar
+ * @return string Cadena sanitizada lista para renderizar en HTML
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);
@@ -352,8 +427,8 @@ function test_input($data) {
   <div class="container">
     <!-- Enlaces de navegación -->
     <div class="nav-buttons">
-      <a href="http://192.168.100.95/Comedor" class="nav-link">← Menú principal</a>
-      <a href="http://192.168.100.95/Comedor/LoginFormCancel.php" class="nav-link">📅 Cancelaciones</a>
+      <a href="." class="nav-link">← Menú principal</a>
+      <a href="./LoginFormCancel.php" class="nav-link">📅 Cancelaciones</a>
     </div>
 
     <!-- Logo -->

@@ -211,13 +211,8 @@ $year = test_input($_POST["Anio"]);
 
 
    
-// $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02");
-// $conn = sqlsrv_connect( $serverName, $connectionInfo);
-
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
 
 //////////////////// Query tabla 

@@ -113,17 +113,8 @@ if (!empty($user_name)) {
 }
 
 // Conectar a la base de datos
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionInfo = [
-    "Database" => "Comedor",
-    "UID" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true,
-    "LoginTimeout" => 5
-];
-
-$conn = sqlsrv_connect($serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
 // Variables para los datos del usuario
 $id_empleado = '';

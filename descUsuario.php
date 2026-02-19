@@ -2,34 +2,11 @@
 // ==================== CONFIGURACIÓN Y CONEXIÓN ====================
 session_start();
 
-// Configuración centralizada
-define('DB_SERVER', "DESAROLLO-BACRO\SQLEXPRESS");
-define('DB_DATABASE', "Comedor");
-define('DB_USERNAME', "Larome03");
-define('DB_PASSWORD', "Larome03");
-define('DB_CHARSET', "UTF-8");
+require_once __DIR__ . '/config/database.php';
 
 // Manejo de errores
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
-
-// Función para conexión a base de datos
-function getDatabaseConnection() {
-    $connectionOptions = [
-        "Database" => DB_DATABASE,
-        "Uid" => DB_USERNAME,
-        "PWD" => DB_PASSWORD,
-        "CharacterSet" => DB_CHARSET,
-        "TrustServerCertificate" => true,
-    ];
-    
-    $conn = sqlsrv_connect(DB_SERVER, $connectionOptions);
-    if (!$conn) {
-        die("Error de conexión: " . print_r(sqlsrv_errors(), true));
-    }
-    
-    return $conn;
-}
 
 // Función para validar usuario
 function validarUsuario($conn, $idEmpleado, $nombre) {
@@ -124,7 +101,7 @@ function calcularMontoEntradas($fecha, $tipoComida, $year) {
 }
 
 // ==================== VERIFICAR AUTENTICACIÓN ====================
-$conn = getDatabaseConnection();
+$conn = getComedorConnection();
 $usuarioAutenticado = false;
 $usuarioData = null;
 

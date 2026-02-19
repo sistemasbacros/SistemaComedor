@@ -1,8 +1,7 @@
 <?php
+require_once __DIR__ . '/config/database.php';
 ////////////////// Insert
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Ticket", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+$conn = getTicketConnection();
 
 // if( $conn ) {
      // echo "Conexión establecida.<br />";

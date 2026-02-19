@@ -1,3 +1,70 @@
+<!--
+ @file Desglosechecador.php
+ @brief Desglose de registros de asistencia del checador (lector QR) con filtros por rango de fecha.
+
+ @description
+ Módulo de consulta de registros de entrada del Sistema Checador integrado al comedor.
+ Extrae y muestra los registros de acceso capturados por el lector QR, permitiendo filtrar
+ por rango de fechas (día-mes-año inicial a día-mes-año final). El flujo es:
+
+   1. El sistema ejecuta en PHP la consulta contra la tabla Entradas (registros QR brutos).
+      La consulta analítica parsea el campo Nombre (que contiene datos crudos del lector QR
+      en dos formatos posibles) para extraer el nombre legible del empleado.
+   2. Los datos procesados se serializan a JSON y se pasan como variables JavaScript.
+   3. Al hacer clic en "Consultar", la función AgregaCampos() filtra los registros por
+      el rango de fechas seleccionado en la UI y construye el dataset de la DataTable.
+   4. La DataTable muestra los registros filtrados con columnas: Nombre, Fecha, Entrada.
+   5. El usuario puede exportar la tabla filtrada a Excel usando el botón XLSX.js.
+
+ Formatos de datos QR parseados por la consulta SQL:
+   - Formato 1 (Nombre empieza con 'i'): Contiene patrón "RE:{nombre_area} A:{datos}"
+     → Extrae el nombre de área limpio eliminando prefijo 'RE:' y sufijo ' AREA'.
+   - Formato 2 (Nombre empieza con 'N'): Contiene patrón "N.E:{nombre} NSS:{numero}"
+     → Extrae el nombre del empleado eliminando 'N.E:' y ' NSS:' con delimitadores ':'.
+
+ @module Módulo de Checador y Control de Asistencias
+ @access DIRECCIÓN | RECURSOS HUMANOS | COCINA | ADMINISTRADOR
+
+ @dependencies
+ - JS CDN: jQuery 3.5.1, DataTables 1.13.4, ECharts 5.4.2, XLSX.js 0.15.1
+ - PHP: sqlsrv (extensión Microsoft SQL Server)
+
+ @database
+ - Base de datos: Comedor (DESAROLLO-BACRO\SQLEXPRESS)
+ - Tablas:
+     * [dbo].[Entradas] — Registros de acceso QR del checador de empleados.
+       Columnas relevantes: Nombre (datos crudos QR), Hora_Entrada (hora de entrada), Fecha (fecha del registro)
+ - Patrones SQL: CASE WHEN LIKE, CHARINDEX, SUBSTRING, LEFT, LEN, LTRIM, RTRIM, REPLACE
+
+ @analytics
+ - Tipo de visualización: Tabla DataTables interactiva con filtrado de fechas cliente-side
+ - Métricas calculadas:
+     * Registros de entrada por empleado en el rango de fechas seleccionado
+     * Filtrado por rango: día/mes/año inicio → día/mes/año fin
+ - Período de análisis: Rango libre definido por el usuario (Mes inicio, Día inicio,
+   Mes final, Día final, Año)
+
+ @inputs
+ - Filtros UI: Mes inicio (01–12), Día inicio (01–31), Mes final (01–12),
+   Día final (01–31), Año (2023–2030)
+ - Botón: "Consultar" → dispara AgregaCampos()
+ - Botón: "Exporta tu tabla a excel" → llama ExportToExcel('xlsx')
+ - $_POST campos: Mes, Semana (día inicio), Mesfinal, Semana1 (día fin), Anio
+
+ @outputs
+ - Tabla DataTables con columnas: Nombre (empleado), Fecha (hora de entrada), Entrada (fecha)
+ - Exportación a Excel (.xlsx) via biblioteca XLSX.js usando XLSX.utils.table_to_book
+
+ @security
+ - Función test_input() para sanitización: trim, stripslashes, htmlspecialchars
+ - NOTA: Credenciales de base de datos hardcodeadas (pendiente migrar a .env)
+ - NOTA: No hay verificación de sesión activa en este módulo
+
+ @author Equipo Tecnología BacroCorp
+ @version 1.0
+ @since 2024
+ @updated 2026-02-18
+-->
 <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
 <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
 <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
@@ -175,6 +242,29 @@ font-family: Arial Narrow;
 
 
 <?php
+/**
+ * Bloque PHP de carga de datos del checador.
+ *
+ * Ejecutado en cada carga de página (incluso sin POST). Lee los parámetros del formulario
+ * mediante test_input() para prevenir inyecciones, establece conexión a la base de datos
+ * Comedor, ejecuta la consulta de parseo de registros QR y población los arrays PHP
+ * que luego se serializan a JSON para consumo JavaScript.
+ *
+ * Variables de entrada ($_POST):
+ *   - Mes       → $mesini  : Mes de inicio del filtro
+ *   - Mesfinal  → $mesfin  : Mes de fin del filtro
+ *   - Semana    → $semana  : Día de inicio del filtro
+ *   - Semana1   → $semana1 : Día de fin del filtro
+ *   - Anio      → $year    : Año del filtro
+ *
+ * Arrays poblados para exportación a JS:
+ *   - $array_tot1 : Nombres de empleados parseados del QR
+ *   - $array_tot2 : Fechas/horas de entrada (Hora_Entrada)
+ *   - $array_tot3 : Fechas de los registros (Fecha original)
+ *
+ * NOTA DE MIGRACIÓN PENDIENTE: Las credenciales de conexión están hardcodeadas.
+ * Deben migrarse a config/database.php usando las variables de entorno del archivo .env.
+ */
 //////onclick="AgregaCampos()"
 $mes = $semana = $anio;
 
@@ -210,16 +300,47 @@ $year = test_input($_POST["Anio"]);
 
 
    
-// $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02");
-// $conn = sqlsrv_connect( $serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
 
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
-
-
+/* =========================================================
+ * CONSULTA ANALÍTICA: Parseo de Registros QR del Checador para Extracción de Nombres
+ * =========================================================
+ * Patrón SQL: CASE WHEN LIKE + CHARINDEX + SUBSTRING + LEFT + LEN + LTRIM + RTRIM + REPLACE
+ * Bases de datos: Comedor
+ * Tablas: [dbo].[Entradas]
+ * Descripción:
+ *   La tabla Entradas almacena datos crudos del lector QR en el campo Nombre. El contenido
+ *   puede venir en dos formatos según el tipo de credencial QR escaneada:
+ *
+ *   FORMATO 1 — Credencial de área (Nombre inicia con 'i'):
+ *     El campo contiene algo como: "iRE:NOMBRE AREA A:datos_adicionales"
+ *     Proceso de extracción:
+ *       1. SUBSTRING desde la posición de 'RE:' hasta el final del string.
+ *       2. LEFT hasta la posición de 'A:' en ese substring.
+ *       3. Eliminación de ' AREA' y 'RE:' con REPLACE.
+ *       4. LTRIM/RTRIM para eliminar espacios residuales.
+ *     Resultado: Nombre del área limpio.
+ *
+ *   FORMATO 2 — Credencial de empleado (Nombre inicia con 'N'):
+ *     El campo contiene algo como: "N:NOMBRE NSS:12345"
+ *     Proceso de extracción:
+ *       1. SUBSTRING desde posición después del primer ':' hasta el final.
+ *       2. LEFT hasta la posición del siguiente ':' en ese substring.
+ *       3. Eliminación de 'N.E:' y ' NSS:' con REPLACE.
+ *       4. LTRIM/RTRIM para eliminar espacios residuales.
+ *     Resultado: Nombre del empleado limpio.
+ *
+ *   Filtra registros donde Nombre resultante sea NULL (registros no reconocibles).
+ *   Renombra: Hora_Entrada → Fecha (hora de entrada), Fecha → Hora (fecha del registro).
+ *
+ * Columnas retornadas:
+ *   - Nombre : Nombre del empleado o área extraído del string QR
+ *   - Fecha  : Hora real de entrada (campo Hora_Entrada original)
+ *   - Hora   : Fecha del registro de asistencia (campo Fecha original)
+ * =========================================================
+ */
 $sql = "Select * from (
 Select Nombre= case when Nombre like 'i%' then ltrim(rtrim(replace(Replace(left(Substring(Nombre,Charindex('RE:',Nombre,1),len(Nombre)-Charindex('RE:',Nombre,1)),
 Charindex('A:',Substring(Nombre,Charindex('RE:',Nombre,1),len(Nombre)-Charindex('RE:',Nombre,1)),1)),' AREA',''),'RE:','')))
@@ -255,6 +376,17 @@ sqlsrv_free_stmt( $stmt);
 
 
 
+/**
+ * Sanitiza y limpia una entrada de formulario.
+ *
+ * Aplica tres transformaciones secuenciales:
+ *   1. trim()             — Elimina espacios al inicio y al final.
+ *   2. stripslashes()     — Elimina barras invertidas (protección contra magic quotes).
+ *   3. htmlspecialchars() — Convierte caracteres especiales HTML a entidades (prevención XSS).
+ *
+ * @param string $data Cadena de texto proveniente de un campo de formulario.
+ * @return string Cadena sanitizada lista para uso seguro.
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);
@@ -270,6 +402,23 @@ function test_input($data) {
 
 
  //////////////////////////////////////////////////////////// Function javascipt agregar columnas
+/**
+ * @function AgregaCampos
+ * @description Función principal de filtrado y visualización del checador. Ejecutada al
+ *   presionar "Consultar", realiza las siguientes operaciones:
+ *   1. Lee los selectores de fecha: Mes inicio (e), Mes final (e1), Día inicio (e2),
+ *      Día final (e3) y Año (e4) del formulario HTML.
+ *   2. Construye las fechas de inicio y fin en formato DD-MM-YYYY.
+ *   3. Itera sobre el array de registros QR (dataqu21, dataqu22, dataqu23) comparando
+ *      las fechas en formato string (comparación por posición de chars).
+ *   4. Maneja dos casos de rango:
+ *      - Cuando día inicio > día final (rango cruza fin/inicio de mes): usa OR lógico.
+ *      - Cuando día inicio <= día final (rango normal): usa AND lógico.
+ *   5. Construye el array dataSet con los registros filtrados [Nombre, Fecha, Hora].
+ *   6. Inicializa la DataTable #example con los datos filtrados, configurando la
+ *      paginación con máximos de 200 registros por página.
+ * @returns {void}
+ */
  function  AgregaCampos() {
 	 
 var dataqu21 = <?php echo json_encode($array_tot1);?>;
@@ -382,6 +531,17 @@ new DataTable('#example', {
 
 
 
+/**
+ * @function ExportToExcel
+ * @description Exporta la DataTable #example a un archivo Excel (.xlsx o .xls) usando
+ *   la biblioteca XLSX.js. Convierte el elemento de tabla HTML completo en un libro de
+ *   trabajo Excel con una sola hoja llamada "sheet1". Si el parámetro dl es true,
+ *   retorna el contenido en base64 en lugar de disparar la descarga directa.
+ * @param {string} type - Tipo de archivo de salida. Ej: 'xlsx', 'xls', 'csv'
+ * @param {string} [fn] - Nombre del archivo de salida (por defecto 'MySheetName.xlsx')
+ * @param {boolean} [dl=false] - Si true retorna base64; si false descarga el archivo
+ * @returns {string|void} Base64 del archivo si dl=true, void si dl=false
+ */
 function ExportToExcel(type, fn, dl) {
        var elt = document.getElementById('example');
        var wb = XLSX.utils.table_to_book(elt, { sheet: "sheet1" });

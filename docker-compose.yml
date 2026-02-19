@@ -12,11 +12,14 @@ services:
       - ./php/custom.ini:/usr/local/etc/php/conf.d/custom.ini
     environment:
       - APP_ENV=${APP_ENV:-production}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT:-1433}
-      - DB_DATABASE=${DB_DATABASE}
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_COMEDOR_SERVER=${DB_COMEDOR_SERVER}
+      - DB_COMEDOR_DATABASE=${DB_COMEDOR_DATABASE}
+      - DB_COMEDOR_USERNAME=${DB_COMEDOR_USERNAME}
+      - DB_COMEDOR_PASSWORD=${DB_COMEDOR_PASSWORD}
+      - DB_KPI_SERVER=${DB_KPI_SERVER}
+      - DB_KPI_DATABASE=${DB_KPI_DATABASE}
+      - DB_KPI_USERNAME=${DB_KPI_USERNAME}
+      - DB_KPI_PASSWORD=${DB_KPI_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "php-fpm-healthcheck || php -r 'exit(0);'"]
       interval: 30s

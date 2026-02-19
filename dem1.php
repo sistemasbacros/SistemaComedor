@@ -1,14 +1,7 @@
 <?php
 // ————— Conexión —————
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS";
-$connectionOptions = [
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8"
-];
-
-$conn = sqlsrv_connect($serverName, $connectionOptions);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 if (!$conn) {
     die("Conexión fallida: " . print_r(sqlsrv_errors(), true));
 }

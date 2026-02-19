@@ -1,3 +1,60 @@
+<!--
+ * @file Menpedidos.php
+ * @brief Formulario de registro del menú semanal del empleado (Desayuno y/o Comida por día).
+ *
+ * @description
+ * Módulo de captura de pedidos semanales. Presenta un formulario con tarjetas por día
+ * (Lunes a Viernes), donde el empleado puede elegir "Desayuno", "Comida" o ninguno para
+ * cada jornada. Al enviar (POST), el módulo PHP embebido valida las credenciales del
+ * usuario contra la tabla ConPed, verifica que no exista ya un pedido para la semana
+ * seleccionada y, si todo es correcto, inserta dos registros en PedidosComida: uno para
+ * los desayunos (lunes–viernes) y otro para las comidas.
+ *
+ * Flujo principal:
+ *   1. GET: Renderiza el formulario vacío con los días y el selector de fecha.
+ *   2. POST: Sanitiza entradas -> valida credenciales -> verifica duplicado ->
+ *            INSERT doble (desayunos + comidas) -> muestra modal de resultado.
+ *
+ * ADVERTENCIA: Este archivo contiene credenciales de base de datos hardcodeadas.
+ * Debe migrarse para usar getComedorConnection() de config/database.php.
+ *
+ * @module Pedidos Semanales
+ * @access Acceso público — autenticación interna mediante tabla ConPed
+ *
+ * @dependencies
+ * - Librerías JS: FontAwesome 6.5.0
+ * - Archivos PHP: Ninguno (conexión directa hardcodeada)
+ *
+ * @database
+ * - Tablas: PedidosComida, ConPed (BD Comedor)
+ * - Operaciones: SELECT (validación de credenciales, conteo de pedidos existentes), INSERT
+ *
+ * @session
+ * - No utiliza sesión PHP; la autenticación se realiza mediante POST (Usuario + Contraseña)
+ *
+ * @inputs
+ * - $_POST['gender1'...'gender10'] : string - Selección de tipo de comida por día
+ *   (valores posibles: 'Desayuno', 'Comida' o vacío si no se seleccionó)
+ * - $_POST['Nempleado']  : int    - Número de empleado (rango 1–1225)
+ * - $_POST['Usuar']      : string - Nombre de usuario para autenticación
+ * - $_POST['contrase']   : string - Contraseña del usuario
+ * - $_POST['Fecha2']     : string - Fecha de inicio de semana (YYYY-MM-DD)
+ *
+ * @outputs
+ * - HTML renderizado con formulario de selección semanal
+ * - Modal JavaScript con resultado del guardado (éxito o error)
+ *
+ * @security
+ * - test_input() aplica trim, stripslashes y htmlspecialchars con ENT_QUOTES/UTF-8
+ * - Validación de credenciales contra tabla ConPed (Usuario + Contraseña en texto plano)
+ * - Prevención de pedido duplicado: máximo 2 registros por semana por usuario
+ * - Credenciales de BD hardcodeadas (pendiente de migración a variables de entorno)
+ *
+ * @author Equipo Tecnología BacroCorp
+ * @version 1.0
+ * @since 2024
+ * @updated 2026-02-18
+-->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -389,6 +446,16 @@
 </script>
 
 <?php
+/**
+ * @brief Sanitiza una cadena de texto para su uso seguro en HTML.
+ *
+ * Aplica secuencialmente: eliminación de espacios extremos (trim),
+ * eliminación de barras de escape (stripslashes) y conversión de
+ * caracteres especiales a entidades HTML con ENT_QUOTES y codificación UTF-8.
+ *
+ * @param string $data Cadena de texto a sanitizar
+ * @return string Cadena sanitizada lista para uso seguro en HTML y consultas
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);
@@ -396,6 +463,17 @@ function test_input($data) {
   return $data;
 }
 
+/* =========================================================
+ * PROCESAMIENTO DEL FORMULARIO POST
+ * Flujo:
+ *   1. Sanitiza todos los campos recibidos con test_input()
+ *   2. Conecta a la BD Comedor
+ *   3. Valida credenciales del usuario (ConPed)
+ *   4. Verifica que no exista ya un pedido para la semana y usuario indicados
+ *   5. Inserta dos registros en PedidosComida: uno para desayunos, otro para comidas
+ *   6. Emite llamada JS al modal de notificación con el resultado
+ * =========================================================
+ */
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
   $lunesd = test_input($_POST["gender1"] ?? '');
   $lunesc = test_input($_POST["gender2"] ?? '');
@@ -412,22 +490,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
   $cont = test_input($_POST["contrase"] ?? '');
   $fecha = test_input($_POST["Fecha2"] ?? '');
 
-  $serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-  $connectionInfo = [
-    "Database" => "Comedor",
-    "UID" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8"
-  ];
-  $conn = sqlsrv_connect($serverName, $connectionInfo);
+  require_once __DIR__ . '/config/database.php';
+  $conn = getComedorConnection();
 
   if (!$conn) {
     echo '<script>showModal("error", "Error al conectar con la base de datos.");</script>';
   } else {
+    /* =========================================================
+     * CONSULTA: Validación de credenciales de usuario
+     * Tablas: ConPed
+     * Retorna: Fila si Usuario y Contraseña coinciden; vacío si son incorrectos.
+     * =========================================================
+     */
     $sql2 = "SELECT Usuario, Contrasena FROM ConPed WHERE Usuario = ? AND Contrasena = ?";
     $stmt2 = sqlsrv_query($conn, $sql2, [$usua, $cont]);
     $credencial_valida = ($stmt2 && sqlsrv_has_rows($stmt2));
 
+    /* =========================================================
+     * CONSULTA: Verificación de pedido duplicado en la semana
+     * Tablas: PedidosComida
+     * Retorna: Conteo de registros existentes para el usuario y fecha indicados.
+     *          Si el Total >= 2, se rechaza el nuevo pedido (ya tiene completos sus 2 registros).
+     * =========================================================
+     */
     $sql3 = "SELECT COUNT(*) AS Total FROM PedidosComida WHERE Fecha = ? AND Usuario = ?";
     $stmt3 = sqlsrv_query($conn, $sql3, [$fecha, $usua]);
     $row = sqlsrv_fetch_array($stmt3, SQLSRV_FETCH_ASSOC);
@@ -438,7 +523,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } elseif ($valor1 >= 2) {
       echo '<script>showModal("error", "Ya tienes un pedido para esta fecha.");</script>';
     } else {
-      $sql = "INSERT INTO PedidosComida (Id_Empleado, Nom_Pedido, Usuario, Contrasena, Fecha, Lunes, Martes, Miercoles, Jueves, Viernes, Costo) 
+      /* =========================================================
+       * INSERCIÓN: Registro del pedido semanal (dos filas por semana)
+       * Tablas: PedidosComida
+       * Parámetros 1 (desayunos): Id_Empleado, Usuario, Contrasena, Fecha, L-V opciones desayuno
+       * Parámetros 2 (comidas):   Id_Empleado, Usuario, Contrasena, Fecha, L-V opciones comida
+       * Costo fijo: 30 (unidades monetarias)
+       * =========================================================
+       */
+      $sql = "INSERT INTO PedidosComida (Id_Empleado, Nom_Pedido, Usuario, Contrasena, Fecha, Lunes, Martes, Miercoles, Jueves, Viernes, Costo)
               VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, 30)";
       $params1 = [$numemp, $usua, $cont, $fecha, $lunesd, $martesd, $miercolesd, $juevesd, $viernesd];
       $params2 = [$numemp, $usua, $cont, $fecha, $lunesc, $martesc, $miercolesc, $juevesc, $viernesc];

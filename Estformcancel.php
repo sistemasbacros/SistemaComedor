@@ -1,10 +1,9 @@
 <?php
+require_once __DIR__ . '/config/database.php';
 $pedido = $name = $email = $gender = $comment = $website = "";
 
 // Conexión a la base de datos SQL Server
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array("Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect($serverName, $connectionInfo);
+$conn = getComedorConnection();
 
 // Consulta SQL para obtener las cancelaciones
 $sql = "SELECT * FROM cancelaciones WHERE convert(date, FECHA, 102) > '2025-10-05' ORDER BY Nombre";

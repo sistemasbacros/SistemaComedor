@@ -35,3 +35,7 @@ vendor/
 
 # Cache de PHP
 *.cache
+
+# Documentación de Claude Code
+CLAUDE.md
+.claude/

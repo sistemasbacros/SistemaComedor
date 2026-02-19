@@ -1,13 +1,84 @@
 <?php
-// Configuración de conexión a SQL Server
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS";
-$connectionOptions = array(
-    "Database" => "Comedor",
-    "Uid" => "Larome03",
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "TrustServerCertificate" => true
-);
+/**
+ * @file gestusu.php
+ * @brief Módulo de Gestión de Usuarios (CRUD completo) del Sistema Comedor.
+ *
+ * @description
+ * Proporciona la interfaz de administración para crear, consultar, actualizar y eliminar
+ * usuarios del Sistema Comedor. Cada operación afecta de forma sincronizada las tablas
+ * ConPed (tabla de acceso/credenciales) y Catalogo_EmpArea (catálogo de empleados por área).
+ *
+ * Las operaciones se despachan mediante un campo oculto POST 'accion' con los valores:
+ * 'insertar_empleado', 'actualizar_empleado' y 'eliminar_empleado'. La consulta de
+ * listado se ejecuta siempre al cargar la página y acepta un parámetro GET 'search'
+ * para filtrar resultados.
+ *
+ * Los formularios de edición y eliminación se presentan como modales Bootstrap 5
+ * poblados dinámicamente mediante JavaScript (data attributes en los botones de acción).
+ *
+ * ADVERTENCIA DE SEGURIDAD: Las credenciales de base de datos están codificadas
+ * directamente en el archivo (hardcoded). Se recomienda migrar al sistema de
+ * variables de entorno usando config/database.php según el estándar del proyecto.
+ *
+ * ADVERTENCIA DE ACCESO: El archivo no implementa verificación de sesión ni de rol.
+ * Se recomienda agregar validación de $_SESSION['logged_in'] y $_SESSION['user_area']
+ * para restringir el acceso exclusivamente a usuarios ADMINISTRADOR.
+ *
+ * @module Módulo de Administración — Gestión de Usuarios
+ * @access ADMINISTRADOR (verificación de sesión/rol pendiente de implementar)
+ *
+ * @dependencies
+ * - PHP: sqlsrv_connect(), sqlsrv_query(), sqlsrv_fetch_array(), sqlsrv_errors()
+ * - JS CDN: Bootstrap 5.3.0, Font Awesome 6.4.0
+ *
+ * @database
+ * - Servidor: DESAROLLO-BACRO\SQLEXPRESS (hardcoded — pendiente migrar a .env)
+ * - Base de datos: Comedor
+ * - Tablas:
+ *   - ConPed          — Tabla principal de credenciales y acceso de empleados
+ *   - Catalogo_EmpArea — Catálogo de empleados con asignación de área
+ * - Operaciones: SELECT | INSERT | UPDATE | DELETE
+ *
+ * @session
+ * - Variables: Ninguna utilizada actualmente
+ * - Roles requeridos: ADMINISTRADOR (no verificado — pendiente implementar)
+ *
+ * @inputs
+ * - $_POST['accion']                 — Operación a ejecutar: 'insertar_empleado' | 'actualizar_empleado' | 'eliminar_empleado'
+ * - $_POST['id_empleado']            — ID numérico del empleado (INSERT)
+ * - $_POST['nombre']                 — Nombre completo del empleado (INSERT)
+ * - $_POST['area']                   — Área de trabajo del empleado (INSERT)
+ * - $_POST['usuario']                — Nombre de usuario para acceso al sistema (INSERT, opcional)
+ * - $_POST['contrasena']             — Contraseña del usuario (INSERT, opcional)
+ * - $_POST['edit_id_empleado']       — Nuevo ID del empleado (UPDATE)
+ * - $_POST['edit_id_empleado_original'] — ID original del empleado a actualizar (UPDATE)
+ * - $_POST['edit_nombre']            — Nuevo nombre completo (UPDATE)
+ * - $_POST['edit_area']              — Nueva área de trabajo (UPDATE)
+ * - $_POST['edit_usuario']           — Nuevo nombre de usuario (UPDATE, opcional)
+ * - $_POST['edit_contrasena']        — Nueva contraseña; vacío conserva la actual (UPDATE, opcional)
+ * - $_POST['delete_id_empleado']     — ID del empleado a eliminar (DELETE)
+ * - $_GET['search']                  — Término de búsqueda para filtrar la lista de usuarios
+ *
+ * @outputs HTML (página completa con tabla de usuarios y modales de edición/eliminación)
+ *
+ * @security
+ * - Consultas parametrizadas con array de parámetros en sqlsrv_query (previene SQL Injection)
+ * - Salida HTML escapada con htmlspecialchars() para prevenir XSS en la tabla y en los modales
+ * - Verificación de ID duplicado antes de INSERT para mantener integridad referencial
+ * - Verificación de nuevo ID existente antes de UPDATE cuando el ID cambia
+ * - Prevención de reenvío de formulario mediante window.history.replaceState
+ * - Validación de campos obligatorios (id_empleado, nombre, area) antes de ejecutar INSERT/UPDATE
+ * - PENDIENTE: Agregar verificación de sesión activa y rol de ADMINISTRADOR
+ * - PENDIENTE: Migrar credenciales hardcoded a variables de entorno (.env)
+ * - PENDIENTE: Implementar hashing de contraseñas (actualmente en texto plano en BD)
+ * - PENDIENTE: Agregar token CSRF en los formularios POST
+ *
+ * @author Equipo Tecnología BacroCorp
+ * @version 1.0
+ * @since 2024
+ * @updated 2026-02-18
+ */
+require_once __DIR__ . '/config/database.php';
 
 // Inicializar variables
 $mensaje = '';
@@ -16,7 +87,7 @@ $search_term = '';
 
 // Establecer conexión
 try {
-    $conn = sqlsrv_connect($serverName, $connectionOptions);
+    $conn = getComedorConnection();
     
     if ($conn === false) {
         $errors = sqlsrv_errors();
@@ -32,7 +103,15 @@ try {
             switch ($_POST['accion']) {
                 case 'insertar_empleado':
                     if (!empty($_POST['id_empleado']) && !empty($_POST['nombre']) && !empty($_POST['area'])) {
-                        
+
+                        /* =========================================================
+                         * OPERACIÓN: READ (verificación de duplicado)
+                         * Tabla: ConPed
+                         * Campos leídos: COUNT(*) como count
+                         * Condición: Id_Empleado igual al ID enviado por formulario
+                         * Propósito: Prevenir inserción de IDs duplicados
+                         * =========================================================
+                         */
                         // Verificar si el ID ya existe
                         $sql_check = "SELECT COUNT(*) as count FROM ConPed WHERE Id_Empleado = ?";
                         $params_check = array($_POST['id_empleado']);
@@ -46,6 +125,14 @@ try {
                             }
                         }
                         
+                        /* =========================================================
+                         * OPERACIÓN: CREATE
+                         * Tabla: ConPed
+                         * Campos afectados: Id_Empleado, Nombre, Area, Usuario, Contrasena
+                         * Condición: No aplica (INSERT nuevo registro)
+                         * Propósito: Registrar las credenciales de acceso del nuevo empleado
+                         * =========================================================
+                         */
                         // Insertar en tabla ConPed
                         $sql_empleados = "INSERT INTO ConPed (Id_Empleado, Nombre, Area, Usuario, Contrasena) VALUES (?, ?, ?, ?, ?)";
                         $params_empleados = array(
@@ -62,6 +149,14 @@ try {
                             $errors = sqlsrv_errors();
                             $mensaje = '<div class="alert alert-danger">Error al insertar en ConPed: ' . $errors[0]['message'] . '</div>';
                         } else {
+                            /* =========================================================
+                             * OPERACIÓN: CREATE
+                             * Tabla: Catalogo_EmpArea
+                             * Campos afectados: Id_Empleado, Nombre, Area
+                             * Condición: No aplica (INSERT nuevo registro)
+                             * Propósito: Registrar el empleado en el catálogo de áreas
+                             * =========================================================
+                             */
                             // Insertar en tabla Catalogo_EmpArea
                             $sql_catalogo = "INSERT INTO Catalogo_EmpArea (Id_Empleado, Nombre, Area) VALUES (?, ?, ?)";
                             $params_catalogo = array(
@@ -92,6 +187,14 @@ try {
                         
                         // Si el ID cambió, verificar que el nuevo ID no exista
                         if ($id_empleado_original != $id_empleado_nuevo) {
+                            /* =========================================================
+                             * OPERACIÓN: READ (verificación de duplicado)
+                             * Tabla: ConPed
+                             * Campos leídos: COUNT(*) como count
+                             * Condición: Id_Empleado igual al nuevo ID propuesto
+                             * Propósito: Prevenir colisión de IDs durante la actualización
+                             * =========================================================
+                             */
                             $sql_check = "SELECT COUNT(*) as count FROM ConPed WHERE Id_Empleado = ?";
                             $params_check = array($id_empleado_nuevo);
                             $stmt_check = sqlsrv_query($conn, $sql_check, $params_check);
@@ -108,6 +211,16 @@ try {
                         // Si no se proporciona nueva contraseña, mantener la actual
                         $nueva_contrasena = $_POST['edit_contrasena'] ?? null;
                         
+                        /* =========================================================
+                         * OPERACIÓN: UPDATE
+                         * Tabla: ConPed
+                         * Campos afectados: Id_Empleado, Nombre, Area, Usuario [, Contrasena]
+                         * Condición: Id_Empleado igual al ID original del empleado
+                         * Propósito: Actualizar datos del empleado; la contraseña solo se
+                         *            actualiza si se proporciona una nueva, de lo contrario
+                         *            se conserva la existente en la base de datos
+                         * =========================================================
+                         */
                         // Actualizar tabla ConPed
                         if (empty($nueva_contrasena)) {
                             // Mantener contraseña actual
@@ -138,6 +251,15 @@ try {
                             $errors = sqlsrv_errors();
                             $mensaje = '<div class="alert alert-danger">Error al actualizar en ConPed: ' . $errors[0]['message'] . '</div>';
                         } else {
+                            /* =========================================================
+                             * OPERACIÓN: UPDATE
+                             * Tabla: Catalogo_EmpArea
+                             * Campos afectados: Id_Empleado, Nombre, Area
+                             * Condición: Id_Empleado igual al ID original del empleado
+                             * Propósito: Mantener sincronizado el catálogo de áreas con
+                             *            los cambios realizados en la tabla ConPed
+                             * =========================================================
+                             */
                             // Actualizar tabla Catalogo_EmpArea
                             $sql_catalogo = "UPDATE Catalogo_EmpArea SET Id_Empleado = ?, Nombre = ?, Area = ? WHERE Id_Empleado = ?";
                             $params_catalogo = array(
@@ -164,16 +286,34 @@ try {
                 case 'eliminar_empleado':
                     if (!empty($_POST['delete_id_empleado'])) {
                         $id_empleado = $_POST['delete_id_empleado'];
-                        
+
+                        /* =========================================================
+                         * OPERACIÓN: DELETE
+                         * Tabla: Catalogo_EmpArea
+                         * Campos afectados: Registro completo del empleado
+                         * Condición: Id_Empleado igual al ID a eliminar
+                         * Propósito: Eliminar primero el registro del catálogo de áreas
+                         *            antes de eliminar las credenciales (integridad referencial)
+                         * =========================================================
+                         */
                         // Eliminar de tabla Catalogo_EmpArea primero
                         $sql_delete_catalogo = "DELETE FROM Catalogo_EmpArea WHERE Id_Empleado = ?";
                         $params_delete_catalogo = array($id_empleado);
                         $stmt_delete_catalogo = sqlsrv_query($conn, $sql_delete_catalogo, $params_delete_catalogo);
-                        
+
                         if ($stmt_delete_catalogo === false) {
                             $errors = sqlsrv_errors();
                             $mensaje = '<div class="alert alert-danger">Error al eliminar de Catalogo_EmpArea: ' . $errors[0]['message'] . '</div>';
                         } else {
+                            /* =========================================================
+                             * OPERACIÓN: DELETE
+                             * Tabla: ConPed
+                             * Campos afectados: Registro completo del empleado
+                             * Condición: Id_Empleado igual al ID a eliminar
+                             * Propósito: Eliminar las credenciales de acceso del empleado
+                             *            una vez eliminado del catálogo de áreas
+                             * =========================================================
+                             */
                             // Eliminar de tabla ConPed
                             $sql_delete_conped = "DELETE FROM ConPed WHERE Id_Empleado = ?";
                             $params_delete_conped = array($id_empleado);
@@ -191,13 +331,23 @@ try {
             }
         }
         
+        /* =========================================================
+         * OPERACIÓN: READ (listado y búsqueda de empleados)
+         * Tabla: ConPed
+         * Campos leídos: Todos (SELECT *)
+         * Condición (búsqueda): Id_Empleado, Nombre, Area o Usuario contienen el término buscado (LIKE)
+         * Condición (sin búsqueda): Sin filtro — retorna todos los registros
+         * Ordenamiento: Id_Empleado ASC
+         * Propósito: Poblar la tabla HTML con el listado de usuarios del sistema
+         * =========================================================
+         */
         // Obtener datos para mostrar con búsqueda
         if (!empty($search_term)) {
-            $sql_empleados = "SELECT * FROM ConPed WHERE 
-                             Id_Empleado LIKE ? OR 
-                             Nombre LIKE ? OR 
-                             Area LIKE ? OR 
-                             Usuario LIKE ? 
+            $sql_empleados = "SELECT * FROM ConPed WHERE
+                             Id_Empleado LIKE ? OR
+                             Nombre LIKE ? OR
+                             Area LIKE ? OR
+                             Usuario LIKE ?
                              ORDER BY Id_Empleado";
             $search_param = "%" . $search_term . "%";
             $params_empleados = array($search_param, $search_param, $search_param, $search_param);

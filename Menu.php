@@ -1,3 +1,63 @@
+<!--
+===============================================================
+DOCUMENTACIÓN: Menu.php
+===============================================================
+@file       Menu.php
+@brief      Visualizador de menús semanales del comedor BacroCorp — Enero 2026
+
+@description
+  Página HTML estática que presenta los menús de desayuno y comida
+  para las cuatro semanas de enero de 2026 del comedor corporativo
+  de BacroCorp. El contenido está organizado en cuatro pestañas (tabs),
+  una por semana, cada una con una tabla de lunes a viernes que detalla
+  los platillos disponibles por categoría (desayuno / comida).
+
+  La navegación entre semanas se gestiona mediante JavaScript vanilla:
+  al hacer clic en un botón de semana, se activa la sección correspondiente
+  añadiendo/quitando la clase CSS "active" tanto en el botón como en
+  la sección de contenido asociada. Solo una sección es visible a la vez.
+
+  Cada platillo se representa con un elemento <span class="food-item">
+  con clases de icono predefinidas (icon-*) que renderizan emojis via
+  pseudo-elemento CSS ::before, facilitando la lectura visual del menú.
+
+  Este archivo NO contiene lógica PHP ni interacción con base de datos;
+  su propósito es exclusivamente informativo/publicitario del menú
+  del comedor para los empleados.
+
+@module     Menú / Comedor — Visualización de menús semanales
+@access     TODOS (no requiere sesión ni autenticación)
+
+@dependencies
+  - Google Fonts: Montserrat (CDN — requiere conexión a internet)
+  - JavaScript vanilla (sin librerías externas)
+  - Imágenes: Logo2.png (asset local del proyecto)
+  - Fondo: Unsplash CDN (https://images.unsplash.com/...)
+
+@database
+  - Sin conexión a base de datos (contenido estático hardcodeado en HTML)
+
+@session
+  - No utiliza variables de sesión
+
+@inputs
+  - Ninguno. Página completamente estática.
+  - Interacción: clic en botones de pestañas (manejado por JS del lado cliente)
+
+@outputs
+  - HTML renderizado al navegador con los cuatro menús semanales de Enero 2026
+  - No genera JSON ni redirecciones
+
+@security
+  - Sin requerimientos de seguridad (contenido público y estático)
+  - No procesa datos de usuario
+
+@author   Equipo Tecnología BacroCorp
+@version  1.0
+@since    2026-01
+@updated  2026-02-18
+===============================================================
+-->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -419,7 +479,7 @@
   <div class="header-container">
     <div class="logo-container">
       <img src="Logo2.png" alt="Logo Comedor">
-      <a href="http://192.168.100.95/Comedor" class="nav-link">Menú principal</a>
+      <a href="." class="nav-link">Menú principal</a>
     </div>
   </div>
 
@@ -757,6 +817,22 @@
     </div>
   </section>
 
+  <!--
+  =========================================================
+  SECCIÓN: JavaScript — Navegación por pestañas (tabs)
+  =========================================================
+  Gestiona la visibilidad de las secciones de menú semanal.
+  Lógica:
+    1. Selecciona todos los botones .tab-button y todas las
+       secciones .menu-section del documento.
+    2. Al hacer clic en cualquier botón:
+       a. Quita la clase "active" de TODOS los botones y secciones.
+       b. Agrega la clase "active" al botón clickeado.
+       c. Agrega la clase "active" a la sección cuyo id coincide
+          con el atributo data-target del botón clickeado.
+  La visibilidad CSS se controla con: .menu-section { display: none }
+  y .menu-section.active { display: block }.
+  -->
   <script>
     const buttons = document.querySelectorAll('.tab-button');
     const sections = document.querySelectorAll('.menu-section');

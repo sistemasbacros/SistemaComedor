@@ -1,3 +1,70 @@
+<!--
+ @file CocinaTotalPedidos.php
+ @brief Reporte consolidado de pedidos de cocina con gráfico de barras y tabla de detalle por empleado.
+
+ @description
+ Módulo de consulta y análisis de pedidos para el área de Cocina. Permite visualizar
+ el volumen de desayunos y comidas pedidos por semana, con la posibilidad de filtrar
+ por Día, Mes y Año. La información se presenta en dos componentes principales:
+
+  1. Gráfico de barras (ECharts): compara desayunos vs. comidas por día de la semana
+     (Lunes a Viernes) para la semana que contiene la fecha seleccionada.
+  2. Tabla DataTables: muestra el detalle por empleado (Id, Nombre, pedidos de cada
+     día de la semana) para la fecha exacta seleccionada.
+
+ El flujo de datos es híbrido PHP+JavaScript:
+  - PHP ejecuta dos consultas SQL al cargar la página y serializa los resultados como
+    JSON inyectado en variables JavaScript.
+  - JavaScript filtra esos arreglos en el cliente según la fecha seleccionada por el
+    usuario y pobla la tabla DataTables y el gráfico ECharts sin recargar la página.
+
+ La consulta SQL principal utiliza la técnica SQL Server PIVOT para transformar los
+ pedidos por día de la semana (filas) en columnas (CLunes, DLunes, CMartes, etc.).
+
+ @module Módulo de Cocina
+ @access COCINA | DIRECCIÓN
+
+ @dependencies
+ - Librerías JS CDN:
+   - jQuery 3.5.1 (incluido dos veces — duplicado, no intencional)
+   - DataTables 1.13.4 (JS + CSS): tabla interactiva de pedidos por empleado
+   - ECharts 5.4.2 (fastly.jsdelivr.net): gráfico de barras comparativo
+ - PHP: extensión sqlsrv (Microsoft SQL Server)
+ @note Este archivo NO utiliza config/database.php — gestiona su propia conexión
+       con credenciales hardcodeadas. Pendiente de migración a .env.
+
+ @database
+ - Tablas:
+   - PedidosComida: pedidos semanales por empleado (columnas Lunes-Viernes)
+   - Catalogo_EmpArea: catálogo de empleados con su área
+ - Operaciones: SELECT con PIVOT (sql), SELECT con LEFT JOIN (sql1)
+
+ @session
+ (No utiliza sesión PHP directamente en este archivo)
+
+ @inputs
+ - Controles HTML (lado cliente):
+   - #Semana: día del mes seleccionado (01-31)
+   - #Mes: mes seleccionado (01-12)
+   - #Anio: año seleccionado (2023-2030)
+ - El botón "Buscar" invoca Borrar() + Prueba() en JavaScript
+
+ @outputs
+ - HTML con gráfico de barras ECharts (Desayunos vs Comidas por día de semana)
+ - Tabla DataTables con detalle por empleado y día de la semana
+ - Datos iniciales del gráfico en estado vacío (arreglos data: [])
+
+ @security
+ - No se validan entradas de los controles de fecha en el lado servidor
+ - Las consultas SQL no reciben parámetros de usuario (los filtros son exclusivamente
+   del lado cliente en JavaScript)
+ @uses getComedorConnection() Conexión centralizada desde config/database.php.
+
+ @author Equipo Tecnología BacroCorp
+ @version 1.0
+ @since 2024
+ @updated 2026-02-18
+-->
 <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
 <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
 <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
@@ -129,14 +196,8 @@ $pedido = $name = $email = $gender = $comment = $website = "";
 
 
 
-// $serverName = "LUISROMERO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array( "Database"=>"Comedor", "UID"=>"larome02", "PWD"=>"larome02","CharacterSet" => "UTF-8");
-// $conn = sqlsrv_connect( $serverName, $connectionInfo);
-
-
-$serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-$connectionInfo = array( "Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-$conn = sqlsrv_connect( $serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
 
 // if( $conn ) {
@@ -148,6 +209,31 @@ $conn = sqlsrv_connect( $serverName, $connectionInfo);
 
 
 //////////////////////////////////////////////////Prueba nuevo query
+/* =========================================================
+ * CONSULTA SQL: Totales de pedidos por día de la semana (PIVOT)
+ * Tablas involucradas: PedidosComida
+ *
+ * Patrón SQL: PIVOT + UNION ALL + GROUP BY
+ *
+ * Descripción del proceso:
+ *  1. Subconsulta más interna: UNION ALL de cinco SELECT, uno por cada día de la
+ *     semana (Lunes a Viernes). Cada SELECT agrupa por (Fecha, tipo_comida) y cuenta
+ *     los pedidos de ese día, generando columnas: Fecha, descripcion, fecha_dia,
+ *     Total, D (indicador del día).
+ *  2. Segunda subconsulta: agrega la columna Clave_Uni = left(descripcion, 1) + D
+ *     (ej: 'C' + 'Lunes' = 'CLunes' para comidas, 'D' + 'Lunes' = 'DLunes' para desayunos).
+ *  3. PIVOT: transpone los valores de Clave_Uni en columnas usando SUM(Total).
+ *     Columnas resultantes: CLunes, DLunes, CMartes, DMartes, CMiercoles, DMiercoles,
+ *     CJueves, DJueves, CViernes, DViernes
+ *     (C = Comida, D = Desayuno para cada día).
+ *  4. SELECT externo: agrupa por Fecha y suma cada columna para consolidar todos los
+ *     tipos de comida del mismo día en una sola fila.
+ *
+ * Retorna: Una fila por cada semana (Fecha de inicio), con el conteo de desayunos
+ *          y comidas de cada día (Lunes-Viernes). Los arreglos PHP resultantes
+ *          se inyectan en JavaScript para alimentar el gráfico ECharts.
+ * =========================================================
+ */
 $sql = "Select Fecha,
 Sum(CLunes) as CLunes,Sum(DLunes) as DLunes,
 Sum(CMartes) as CMartes,Sum(DMartes) as DMartes,
@@ -191,6 +277,23 @@ PIVOT
 Group by Fecha";
 
 
+/* =========================================================
+ * CONSULTA SQL: Detalle de pedidos por empleado y día de la semana
+ * Tablas involucradas: Catalogo_EmpArea (subconsulta a), PedidosComida (subconsulta b/c)
+ *
+ * Patrón SQL: LEFT JOIN entre catálogo de empleados y pedidos
+ *
+ * Descripción:
+ *  Recupera todos los empleados del catálogo (Catalogo_EmpArea) y une sus pedidos
+ *  semanales usando LEFT JOIN sobre PedidosComida. El resultado incluye: Fecha de
+ *  la semana, Id_Empleado, Nombre, y el pedido de cada día (Lunes a Viernes) con
+ *  cadena vacía ('') si no existe pedido (ISNULL).
+ *
+ * Retorna: Una fila por empleado por semana, con las columnas de pedidos diarios.
+ *          Los arreglos PHP resultantes se inyectan en JavaScript para poblar
+ *          la tabla DataTables filtrada por fecha en el cliente.
+ * =========================================================
+ */
 $sql1 = "Select Fecha,c.Id_Empleado, Nombre, ISNULL(Lunes, '') as Lunes, ISNULL(Martes, '') as Martes, ISNULL(Miercoles, '') as Miercoles
 ,ISNULL(Jueves, '') as Jueves,ISNULL(Viernes, '')  as Viernes
 from (Select Id_Empleado,Nombre,Area from [dbo].[Catalogo_EmpArea]) as a
@@ -289,6 +392,15 @@ sqlsrv_free_stmt( $stmt1);
 
 // }
 
+/**
+ * @brief Sanitiza una cadena de texto para uso seguro en el contexto HTML.
+ *
+ * Elimina espacios al inicio y al final, elimina barras invertidas de escape
+ * (stripslashes) y convierte caracteres especiales HTML a entidades (htmlspecialchars).
+ *
+ * @param string $data Cadena de texto a sanitizar
+ * @return string Cadena sanitizada lista para mostrar en HTML
+ */
 function test_input($data) {
   $data = trim($data);
   $data = stripslashes($data);

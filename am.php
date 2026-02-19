@@ -11,9 +11,6 @@ $arrayRecibido=json_decode($_POST["arrayDeValores"], true );
 // }
 
 
-// $serverName = "DESAROLLO-BACRO\SQLEXPRESS"; //serverName\instanceName
-// $connectionInfo = array("Database"=>"Comedor", "UID"=>"Larome03", "PWD"=>"Larome03","CharacterSet" => "UTF-8");
-// $conn = sqlsrv_connect( $serverName, $connectionInfo);
 
 // // if( $conn ) {
      // // echo "Conexión establecida.<br />";

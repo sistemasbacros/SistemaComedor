@@ -55,16 +55,8 @@ $lunes_filtrados = filtrarLunesPasados($lunes_todos);
 $lunes_semana_actual = date('Y-m-d', strtotime('monday this week'));
 
 // Conexión a SQL Server
-$serverName = "DESAROLLO-BACRO\\SQLEXPRESS";
-$connectionInfo = array(
-    "Database" => "Comedor", 
-    "UID" => "Larome03", 
-    "PWD" => "Larome03",
-    "CharacterSet" => "UTF-8",
-    "ReturnDatesAsStrings" => true
-);
-
-$conn = sqlsrv_connect($serverName, $connectionInfo);
+require_once __DIR__ . '/config/database.php';
+$conn = getComedorConnection();
 
 if (!$conn) {
     die("Error de conexión: " . print_r(sqlsrv_errors(), true));
