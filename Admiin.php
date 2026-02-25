@@ -681,6 +681,7 @@ if (!isset($_SESSION['login_token'])) {
                 <i class="fas fa-utensils"></i>
             </div>
             <h1 class="loading-text">BACROCORP - Portal del Comedor</h1>
+              <h3 class="loading-text">Luis Antonio Romero López</h3>
             <p class="loading-subtext">Inicializando sistema de seguridad...</p>
             <div class="spinner"></div>
         </div>
