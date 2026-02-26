@@ -1,7 +1,6 @@
 <?php
 // ==================== CONFIGURACIÓN Y CONEXIÓN ====================
 session_start();
-
 require_once __DIR__ . '/config/database.php';
 
 // Manejo de errores
@@ -11,33 +10,27 @@ ini_set('display_errors', 1);
 // Función para validar usuario
 function validarUsuario($conn, $idEmpleado, $nombre) {
     $sql = "SELECT Id_Empleado, Nombre, Area FROM ConPed WHERE Id_Empleado = ? AND Nombre LIKE ?";
-    $params = array($idEmpleado, '%' . $nombre . '%');
-    
+    $params = [$idEmpleado, '%' . $nombre . '%'];
     $stmt = sqlsrv_query($conn, $sql, $params);
     if ($stmt === false) {
         return false;
     }
-    
-    $usuarioData = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+    $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
     sqlsrv_free_stmt($stmt);
-    
-    return $usuarioData ? $usuarioData : false;
+    return $row ?: false;
 }
 
 // Función para obtener datos del usuario por nombre
 function obtenerUsuarioPorNombre($conn, $nombre) {
     $sql = "SELECT Id_Empleado, Nombre, Area FROM ConPed WHERE Nombre LIKE ?";
-    $params = array('%' . $nombre . '%');
-    
+    $params = ['%' . $nombre . '%'];
     $stmt = sqlsrv_query($conn, $sql, $params);
     if ($stmt === false) {
         return false;
     }
-    
-    $usuarioData = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+    $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
     sqlsrv_free_stmt($stmt);
-    
-    return $usuarioData ? $usuarioData : false;
+    return $row ?: false;
 }
 
 // ==================== FUNCIONES DE CÁLCULO DE PRECIOS ====================
@@ -101,7 +94,11 @@ function calcularMontoEntradas($fecha, $tipoComida, $year) {
 }
 
 // ==================== VERIFICAR AUTENTICACIÓN ====================
+// $conn se usa exclusivamente para las queries de consumo (Entradas, PedidosComida)
 $conn = getComedorConnection();
+$errorConexion = ($conn === false)
+    ? sqlsrv_errors()
+    : null;
 $usuarioAutenticado = false;
 $usuarioData = null;
 
@@ -153,7 +150,7 @@ if (isset($_SESSION['usuario_autenticado']) && $_SESSION['usuario_autenticado'] 
 if (isset($_POST['login']) && $conn) {
     $idEmpleado = $_POST['id_empleado'] ?? '';
     $nombre = $_POST['nombre'] ?? '';
-    
+
     if (!empty($idEmpleado) && !empty($nombre)) {
         $usuarioData = validarUsuario($conn, $idEmpleado, $nombre);
         if ($usuarioData) {
@@ -610,9 +607,9 @@ if ($usuarioAutenticado && $conn) {
     ];
 }
 
-// Cerrar conexión
+// Cerrar conexión Comedor (consumos)
 if (isset($conn)) {
-    sqlsrv_close($conn);
+    closeConnection($conn);
 }
 ?>
 <!DOCTYPE html>
