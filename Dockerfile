@@ -34,7 +34,7 @@ RUN curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /u
 RUN docker-php-ext-install pdo pdo_mysql mbstring exif pcntl bcmath gd
 
 # Instalar drivers SQL Server para PHP
-RUN pecl install sqlsrv pdo_sqlsrv \
+RUN pecl install sqlsrv-5.12.0 pdo_sqlsrv-5.12.0 \
     && docker-php-ext-enable sqlsrv pdo_sqlsrv
 
 # Configurar PHP
