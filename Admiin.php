@@ -680,7 +680,7 @@ if (!isset($_SESSION['login_token'])) {
             <div class="loading-logo">
                 <i class="fas fa-utensils"></i>
             </div>
-            <h1 class="loading-text">BACROCORP - Portal del Comedor</h1>
+            <h1 class="loading-text">BACROCORP - Portal del Luis</h1>
         
             <p class="loading-subtext">Inicializando sistema de seguridad...</p>
             <div class="spinner"></div>
