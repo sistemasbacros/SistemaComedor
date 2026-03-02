@@ -717,7 +717,7 @@ if (!isset($_SESSION['login_token'])) {
             </div>
             <div class="role-info">
                 <i class="fas fa-info-circle me-2"></i>
-                <strong>Administrador:</strong> Acceso completo al sistema | 
+                <strong>Administrador:</strong> Acceso completo al comedor | 
                 <strong>Usuario:</strong> Acceso limitado a funciones básicas
             </div>
         </div>
