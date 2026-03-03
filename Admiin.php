@@ -682,7 +682,6 @@ if (!isset($_SESSION['login_token'])) {
             </div>
             <h1 class="loading-text">BACROCORP - Comedor</h1>
     <ul>
-        <li>Boris</li>
         <li>Luis</li>
     </ul>
             <p class="loading-subtext">Inicializando sistema de seguridad...</p>
