@@ -680,7 +680,7 @@ if (!isset($_SESSION['login_token'])) {
             <div class="loading-logo">
                 <i class="fas fa-utensils"></i>
             </div>
-            <h1 class="loading-text">BACROCORP - Portal del usuario</h1>
+            <h1 class="loading-text">BACROCORP - Portal del Comedor</h1>
         
             <p class="loading-subtext">Inicializando sistema de seguridad...</p>
             <div class="spinner"></div>
@@ -693,7 +693,7 @@ if (!isset($_SESSION['login_token'])) {
         <div class="role-card">
             <div class="admin-badge">
                 <i class="fas fa-crown"></i>
-                ACCESO DIRECCIÓN
+                ACCESO DIRECCIÓN Luis Antonio Romero López
             </div>
             
             <div class="role-icon">
