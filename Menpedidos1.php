@@ -1711,6 +1711,7 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
     <div class="user-detail">
       <i class="fas fa-user-circle"></i>
       <span><strong>Usuario:</strong> <?php echo htmlspecialchars($user_name); ?></span>
+      <span><strong>Avance 1:</strong></span>
     </div>
     <div class="user-detail">
       <i class="fas fa-building"></i>
