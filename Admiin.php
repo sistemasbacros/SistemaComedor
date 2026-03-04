@@ -693,7 +693,7 @@ if (!isset($_SESSION['login_token'])) {
         <div class="role-card">
             <div class="admin-badge">
                 <i class="fas fa-crown"></i>
-                ACCESO DIRECCIÓN Luis Antonio Romero López
+                ACCESO DIRECCIÓN
             </div>
             
             <div class="role-icon">
