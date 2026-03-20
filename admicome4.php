@@ -36,17 +36,17 @@ if (isset($_GET['logout']) && $_GET['logout'] === 'true') {
     }
     
     // Redirigir inmediatamente al login
-    header("Location: Admiin.php");
+    header("Location: " . getenv('APP_URL') . "/Admiin.php");
     exit;
 }
 
 // Verificación estricta de autenticación - CORREGIDO
 $isAuthenticated = (
-    isset($_SESSION['authenticated_from_login']) &&
+    isset($_SESSION['authenticated_from_login']) && 
     $_SESSION['authenticated_from_login'] === true &&
-    isset($_SESSION['session_id']) &&
+    isset($_SESSION['session_id']) && 
     $_SESSION['session_id'] === session_id() &&
-    isset($_SESSION['browser_fingerprint']) &&
+    isset($_SESSION['browser_fingerprint']) && 
     $_SESSION['browser_fingerprint'] === md5($_SERVER['HTTP_USER_AGENT'] . $_SERVER['REMOTE_ADDR'])
 );
 
@@ -56,9 +56,9 @@ if (!$isAuthenticated) {
     session_unset();
     session_destroy();
     setcookie(session_name(), '', time()-3600, '/');
-
+    
     // Redirigir al login
-    header("Location: Admiin.php");
+    header("Location: " . getenv('APP_URL') . "/Admiin.php");
     exit;
 }
 
@@ -68,7 +68,7 @@ if (isset($_SESSION['LOGIN_TIME']) && (time() - $_SESSION['LOGIN_TIME'] > $sessi
     session_unset();
     session_destroy();
     setcookie(session_name(), '', time()-3600, '/');
-    header("Location: Admiin.php");
+    header("Location: " . getenv('APP_URL') . "/Admiin.php");
     exit;
 }
 
@@ -115,15 +115,37 @@ if (!$acceso_completo) {
 // CONEXIÓN A BASE DE DATOS Y CONSULTAS DEL DASHBOARD
 // ==================================================
 
+// Configuración de conexiones a base de datos
 require_once __DIR__ . '/config/database.php';
 
-// // Obtener parámetros de fecha del request awquiii
-// $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d');
-// $fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
+$serverName         = getenv('DB_COMEDOR_SERVER');
+$connectionOptions  = [
+    'Database'             => getenv('DB_COMEDOR_DATABASE'),
+    'Uid'                  => getenv('DB_COMEDOR_USERNAME'),
+    'PWD'                  => getenv('DB_COMEDOR_PASSWORD'),
+    'CharacterSet'         => 'UTF-8',
+    'TrustServerCertificate' => true,
+];
 
+$serverNameContpaq        = getenv('DB_ALQUIMISTA_SERVER');
+$connectionOptionsContpaq = [
+    'Database'             => getenv('DB_ALQUIMISTA_DATABASE'),
+    'Uid'                  => getenv('DB_ALQUIMISTA_USERNAME'),
+    'PWD'                  => getenv('DB_ALQUIMISTA_PASSWORD'),
+    'CharacterSet'         => 'UTF-8',
+    'TrustServerCertificate' => true,
+];
+
+$serverNameBaseNueva        = getenv('DB_BASENEW_SERVER');
+$connectionOptionsBaseNueva = [
+    'Database'             => getenv('DB_BASENEW_DATABASE'),
+    'Uid'                  => getenv('DB_BASENEW_USERNAME'),
+    'PWD'                  => getenv('DB_BASENEW_PASSWORD'),
+    'CharacterSet'         => 'UTF-8',
+    'TrustServerCertificate' => true,
+];
 
 // Obtener parámetros de fecha del request
-// Por defecto: fecha_inicio = ayer, fecha_fin = hoy
 if (isset($_GET['fecha_inicio']) && isset($_GET['fecha_fin'])) {
     $fecha_inicio = $_GET['fecha_inicio'];
     $fecha_fin = $_GET['fecha_fin'];
@@ -247,7 +269,7 @@ $total_exentos_comidas_desde_2026 = 0;
 
 try {
     // Conexión a la base de datos principal
-    $conn = getComedorConnection();
+    $conn = sqlsrv_connect($serverName, $connectionOptions);
     
     if ($conn !== false) {
         // Consulta para total de usuarios en el periodo (EXCLUYENDO EXENTOS)
@@ -413,7 +435,9 @@ try {
             }
         }
         
-        // CONSULTA MEJORADA: Desayunos y comidas agendados SEPARANDO EXENTOS
+        // ============================================================
+        // CONSULTA CORREGIDA: Desayunos y comidas agendados SEPARANDO EXENTOS
+        // ============================================================
         $sql_agendados = "WITH Datos AS (
                             SELECT 
                                 CAST(
@@ -428,7 +452,7 @@ try {
                                         END,
                                         Fecha
                                     ) AS DATE
-                                ) AS Fecha,
+                                ) AS FechaReal,  -- CAMBIADO: ahora se llama FechaReal
                                 Usuario,
                                 Tipo_Comida
                             FROM PedidosComida 
@@ -451,9 +475,11 @@ try {
                             COUNT(CASE WHEN Tipo_Comida = 'Desayuno' AND $exentos_sql_condition_usuario THEN 1 END) AS ExentosDesayunoAgendado,
                             COUNT(CASE WHEN Tipo_Comida = 'Comida' AND $exentos_sql_condition_usuario THEN 1 END) AS ExentosComidaAgendado
                         FROM Datos
-                        WHERE Fecha BETWEEN ? AND ?";
+                        WHERE FechaReal BETWEEN ? AND ?";  // CAMBIADO: ahora filtra por FechaReal
         
         $params_agendados = array($fecha_inicio, $fecha_fin);
+		
+		
         $stmt_agendados = sqlsrv_query($conn, $sql_agendados, $params_agendados);
         
         if ($stmt_agendados !== false) {
@@ -473,22 +499,31 @@ try {
         }
         
         // NUEVA CONSULTA MEJORADA: CANCELACIONES USANDO TIPO_CONSUMO (EXCLUYENDO EXENTOS)
-        $sql_cancelaciones = "SELECT 
-                                SUM(CASE 
-                                    WHEN tipo_consumo = 'Desayuno' THEN 1
-                                    WHEN tipo_consumo = 'Ambos' THEN 1
-                                    ELSE 0 
-                                END) as CancelacionesDesayuno,
-                                SUM(CASE 
-                                    WHEN tipo_consumo = 'Comida' THEN 1
-                                    WHEN tipo_consumo = 'Ambos' THEN 1
-                                    ELSE 0 
-                                END) as CancelacionesComida,
-                                COUNT(*) as TotalRegistros
-                              FROM cancelaciones
+        $sql_cancelaciones = "
+SELECT 
+    -- Desayuno: TODOS los registros (sin filtro de ESTATUS)
+    SUM(CASE 
+        WHEN tipo_consumo IN ('Desayuno', 'Ambos') THEN 1
+        ELSE 0 
+    END) as CancelacionesDesayuno,
+    
+    -- Comida: TODOS los registros (sin filtro de ESTATUS)
+    SUM(CASE 
+        WHEN tipo_consumo IN ('Comida', 'Ambos') THEN 1
+        ELSE 0 
+    END) as CancelacionesComida,
+    
+    -- TotalRegistros: SOLO APROBADOS y AMBOS vale por 2
+    SUM(CASE 
+        WHEN tipo_consumo = 'Desayuno' AND ESTATUS = 'APROBADO' THEN 1
+        WHEN tipo_consumo = 'Comida' AND ESTATUS = 'APROBADO' THEN 1
+        WHEN tipo_consumo = 'Ambos' AND ESTATUS = 'APROBADO' THEN 2
+        ELSE 0 
+    END) as TotalRegistros
+FROM cancelaciones
                               WHERE convert(date, FECHA, 102) BETWEEN ? AND ?
-                              AND NOT $exentos_sql_condition
-                              AND ESTATUS = 'APROBADO'";
+                              
+                             ";
         
         $params_cancelaciones = array($fecha_inicio, $fecha_fin);
         $stmt_cancelaciones = sqlsrv_query($conn, $sql_cancelaciones, $params_cancelaciones);
@@ -803,7 +838,7 @@ try {
     $params_contpaq = array($fecha_inicio_contpaq, $fecha_fin_contpaq);
     
     // CONEXIÓN Y CONSULTA A ALQUIMISTA2024
-    $connAlquimista = getAlquimistaConnection();
+    $connAlquimista = sqlsrv_connect($serverNameContpaq, $connectionOptionsContpaq);
     
     if ($connAlquimista !== false) {
         $stmt_alquimista = sqlsrv_query($connAlquimista, $sql_alquimista, $params_contpaq);
@@ -819,7 +854,7 @@ try {
     }
     
     // CONEXIÓN Y CONSULTA A BASENUEVA
-    $connBaseNueva = getBaseNuevaConnection();
+    $connBaseNueva = sqlsrv_connect($serverNameBaseNueva, $connectionOptionsBaseNueva);
     
     if ($connBaseNueva !== false) {
         $stmt_basenueva = sqlsrv_query($connBaseNueva, $sql_basenueva, $params_contpaq);
@@ -2602,7 +2637,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
             <?php endif; ?>
             
             <li class="nav-item mt-auto">
-                <a class="nav-link text-danger" href="admicome4.php?logout=true" id="logoutBtn">
+                <a class="nav-link text-danger" href="<?php echo getenv('APP_URL'); ?>/admicome4.php?logout=true" id="logoutBtn">
                     <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
                 </a>
             </li>
@@ -3602,7 +3637,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
                     <div id="usuarios-loading" class="loading-overlay"><div class="loading-spinner"></div><div class="loading-text">Cargando sistema de gestión de usuarios...</div></div>
                     <div class="report-iframe-container">
 
-                        <iframe src="gestusu.php" class="report-iframe" id="usuarios-iframe" onload="document.getElementById('usuarios-loading').style.display='none';"></iframe>
+                        <iframe src="<?php echo getenv('APP_URL'); ?>/gestusu.php" class="report-iframe" id="usuarios-iframe" onload="document.getElementById('usuarios-loading').style.display='none';"></iframe>
                     </div>
                 </div>
             </div>
@@ -3619,7 +3654,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
                 <div class="card-body p-0 position-relative">
                     <div id="reportes-loading" class="loading-overlay"><div class="loading-spinner"></div><div class="loading-text">Cargando sistema de reportes...</div></div>
                     <div class="report-iframe-container">
-                        <iframe src="dem1.php" class="report-iframe" id="report-iframe" onload="document.getElementById('reportes-loading').style.display='none';"></iframe>
+                        <iframe src="<?php echo getenv('APP_URL'); ?>/dem1.php" class="report-iframe" id="report-iframe" onload="document.getElementById('reportes-loading').style.display='none';"></iframe>
                     </div>
                 </div>
             </div>
@@ -3636,7 +3671,7 @@ $periodo_mixto_precios = ($incluye_viejo_precio && $incluye_nuevo_precio);
                 <div class="card-body p-0 position-relative">
                     <div id="menus-loading" class="loading-overlay"><div class="loading-spinner"></div><div class="loading-text">Cargando sistema de gestión de menús...</div></div>
                     <div class="menu-iframe-container">
-                        <iframe src="menu1.php" class="menu-iframe" id="menu-iframe" onload="document.getElementById('menus-loading').style.display='none';"></iframe>
+                        <iframe src="<?php echo getenv('APP_URL'); ?>/menu1.php" class="menu-iframe" id="menu-iframe" onload="document.getElementById('menus-loading').style.display='none';"></iframe>
                     </div>
                 </div>
             </div>

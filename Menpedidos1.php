@@ -15,51 +15,54 @@ session_set_cookie_params([
 session_start();
 
 // ==================================================
-// DEFINICIÓN DE SEMANAS DISPONIBLES
+// DEFINICIÓN DE SEMANAS DISPONIBLES - FEBRERO/MARZO 2026
 // ==================================================
 
 $semanasDisponibles = [
-    // Última semana de Enero 2026 (Semana 4)
-    [
-        'fecha' => '2026-01-26',
-        'mostrar' => '26/01/2026 - Semana 4 Ene (26-30 Ene)',
-        'num_semana' => 4,
-        'mes' => 'enero',
-        'fecha_inicio' => '2026-01-26',
-        'fecha_fin' => '2026-01-30'
-    ],
-    // Semanas de Febrero 2026
-    [
-        'fecha' => '2026-02-02',
-        'mostrar' => '02/02/2026 - Semana 1 Feb (3-6 Feb)',
-        'num_semana' => 1,
-        'mes' => 'febrero',
-        'fecha_inicio' => '2026-02-03',
-        'fecha_fin' => '2026-02-06'
-    ],
-    [
-        'fecha' => '2026-02-09',
-        'mostrar' => '09/02/2026 - Semana 2 Feb (9-13 Feb)',
-        'num_semana' => 2,
-        'mes' => 'febrero',
-        'fecha_inicio' => '2026-02-09',
-        'fecha_fin' => '2026-02-13'
-    ],
-    [
-        'fecha' => '2026-02-16',
-        'mostrar' => '16/02/2026 - Semana 3 Feb (16-20 Feb)',
-        'num_semana' => 3,
-        'mes' => 'febrero',
-        'fecha_inicio' => '2026-02-16',
-        'fecha_fin' => '2026-02-20'
-    ],
+    // Semana 4 de Febrero: 23-27 Febrero 2026 (ACTIVA)
     [
         'fecha' => '2026-02-23',
-        'mostrar' => '23/02/2026 - Semana 4 Feb (23-27 Feb)',
+        'mostrar' => '23/02/2026 - Semana 4 Feb (23-27 Feb) ⭐ ACTIVA',
         'num_semana' => 4,
         'mes' => 'febrero',
         'fecha_inicio' => '2026-02-23',
         'fecha_fin' => '2026-02-27'
+    ],
+    // Semana 1: 2-6 Marzo 2026
+    [
+        'fecha' => '2026-03-02',
+        'mostrar' => '02/03/2026 - Semana 1 Mar (2-6 Mar)',
+        'num_semana' => 1,
+        'mes' => 'marzo',
+        'fecha_inicio' => '2026-03-02',
+        'fecha_fin' => '2026-03-06'
+    ],
+    // Semana 2: 9-13 Marzo 2026
+    [
+        'fecha' => '2026-03-09',
+        'mostrar' => '09/03/2026 - Semana 2 Mar (9-13 Mar)',
+        'num_semana' => 2,
+        'mes' => 'marzo',
+        'fecha_inicio' => '2026-03-09',
+        'fecha_fin' => '2026-03-13'
+    ],
+    // Semana 3: 16-20 Marzo 2026
+    [
+        'fecha' => '2026-03-16',
+        'mostrar' => '16/03/2026 - Semana 3 Mar (16-20 Mar)',
+        'num_semana' => 3,
+        'mes' => 'marzo',
+        'fecha_inicio' => '2026-03-16',
+        'fecha_fin' => '2026-03-20'
+    ],
+    // Semana 4: 23-27 Marzo 2026
+    [
+        'fecha' => '2026-03-23',
+        'mostrar' => '23/03/2026 - Semana 4 Mar (23-27 Mar)',
+        'num_semana' => 4,
+        'mes' => 'marzo',
+        'fecha_inicio' => '2026-03-23',
+        'fecha_fin' => '2026-03-27'
     ]
 ];
 
@@ -241,423 +244,11 @@ foreach ($semanasDisponibles as $semana) {
 }
 
 // ==================================================
-// MENÚS COMPLETOS CORREGIDOS (SIN ICONOS DUPLICADOS)
+// MENÚS COMPLETOS - FEBRERO (SOLO SEMANA 4 ACTIVA) Y MARZO 2026
 // ==================================================
 
 $menus_completos = [
-    // ÚLTIMA SEMANA DE ENERO 2026 (Semana 4: 26-30 Enero)
-    'enero_4' => [ 
-        'lunes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍌',
-                'descripcion' => 'Plátano con yogurt',
-                'icono3' => '🌯',
-                'detalle' => 'Burrito norteño'
-            ],
-            'comida' => [
-                'icono' => '🍝',
-                'nombre' => 'Espagueti alfredo',
-                'icono2' => '🥩',
-                'descripcion' => 'Chuleta ahumada con papas al ajillo y frijoles',
-                'icono3' => '🍓',
-                'postre' => 'Gelatina de frutos rojos',
-                'icono4' => '🍍',
-                'bebida' => 'Agua de piña'
-            ]
-        ],
-        'martes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🥞',
-                'descripcion' => 'Hot cake de amaranto',
-                'icono3' => '🍳',
-                'detalle' => 'Omelette de espinacas'
-            ],
-            'comida' => [
-                'icono' => '🍜',
-                'nombre' => 'Sopa aguada codito',
-                'icono2' => '🥘',
-                'descripcion' => 'Tortitas de carne en morita con frijoles',
-                'icono3' => '🧁',
-                'postre' => 'Cup cake fresa',
-                'icono4' => '🌰',
-                'bebida' => 'Agua de tamarindo'
-            ]
-        ],
-        'miercoles' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🥛',
-                'descripcion' => 'Yogurt con granola',
-                'icono3' => '🍳',
-                'detalle' => 'Huevos cocoyoc'
-            ],
-            'comida' => [
-                'icono' => '🍚',
-                'nombre' => 'Arroz blanco',
-                'icono2' => '🐟',
-                'descripcion' => 'Pescado rebosado con ensalada',
-                'icono3' => '🍮',
-                'postre' => 'Gelatina bicolor agua',
-                'icono4' => '🥭',
-                'bebida' => 'Agua de frutas tropicales'
-            ]
-        ],
-        'jueves' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍈',
-                'descripcion' => 'Papaya',
-                'icono3' => '🌯',
-                'detalle' => 'Wrap de pollo'
-            ],
-            'comida' => [
-                'icono' => '🍚',
-                'nombre' => 'Arroz rojo',
-                'icono2' => '🍗',
-                'descripcion' => 'Pollo en salsa verde con papas y frijoles',
-                'icono3' => '🍊',
-                'postre' => 'Panqué de naranja',
-                'icono4' => '🥒',
-                'bebida' => 'Agua de pepino con limón'
-            ]
-        ],
-        'viernes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🥤',
-                'descripcion' => 'Licuado de chocoplátano',
-                'icono3' => '🥪',
-                'detalle' => 'Sándwich de jamón y panela'
-            ],
-            'comida' => [
-                'icono' => '🍲',
-                'nombre' => 'Consome de verduras',
-                'icono2' => '🍝',
-                'descripcion' => 'Lasaña vegetariana con ensalada',
-                'icono3' => '🌈',
-                'postre' => 'Gelatina mosaico',
-                'icono4' => '🍊',
-                'bebida' => 'Agua de naranjada'
-            ]
-        ]
-    ],
-    // FEBRERO 2026 - SEMANA 1: 3-6 Febrero (Martes a Viernes)
-    'febrero_1' => [
-        'lunes' => [
-            'desayuno' => [
-                'sin_servicio' => true,
-                'mensaje' => 'Sin reservación',
-                'icono' => '🚫'
-            ],
-            'comida' => [
-                'sin_servicio' => true,
-                'mensaje' => 'Sin reservación',
-                'icono' => '🚫'
-            ]
-        ],
-        'martes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍈',
-                'descripcion' => 'Papaya con piña',
-                'icono3' => '🍳',
-                'detalle' => 'Huevo con salchicha'
-            ],
-            'comida' => [
-                'icono' => '🐌',
-                'nombre' => 'Sopa de caracol',
-                'icono2' => '🍗',
-                'descripcion' => 'Pechuga asada con nopal y panela',
-                'icono3' => '🫘',
-                'detalle2' => 'Con frijoles',
-                'icono4' => '🍬',
-                'postre' => 'Palanquetas',
-                'icono5' => '🌺',
-                'bebida' => 'Agua de Jamaica'
-            ]
-        ],
-        'miercoles' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🥞',
-                'descripcion' => 'Hot cake',
-                'icono3' => '🫘',
-                'detalle' => 'Enfrijoladas'
-            ],
-            'comida' => [
-                'icono' => '🍝',
-                'nombre' => 'Fusilli poblano',
-                'icono2' => '🥩',
-                'descripcion' => 'Costillas en morita',
-                'icono3' => '🫘',
-                'detalle2' => 'Con frijoles',
-                'icono4' => '🌈',
-                'postre' => 'Gelatina mosaico leche',
-                'icono5' => '🍓',
-                'bebida' => 'Agua de fresa'
-            ]
-        ],
-        'jueves' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍉',
-                'descripcion' => 'Sandía con miel y granola',
-                'icono3' => '🥪',
-                'detalle' => 'Sandwich de queso asado'
-            ],
-            'comida' => [
-                'icono' => '🍚',
-                'nombre' => 'Arroz rojo',
-                'icono2' => '🐟',
-                'descripcion' => 'Filete de pescado a la plancha con verduras',
-                'icono3' => '🍫',
-                'postre' => 'Helado de chocolate',
-                'icono4' => '🥣',
-                'bebida' => 'Agua de avena'
-            ]
-        ],
-        'viernes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🥣',
-                'descripcion' => 'Atole de chocolate',
-                'icono3' => '🥘',
-                'detalle' => 'Chilaquiles verdes con huevo'
-            ],
-            'comida' => [
-                'icono' => '🥣',
-                'nombre' => 'Sopa de verdura',
-                'icono2' => '🌮',
-                'descripcion' => 'Tacos dorados de res',
-                'icono3' => '3️⃣',
-                'detalle2' => '3 piezas',
-                'icono4' => '🥛',
-                'postre' => 'Gelatina de yogurt',
-                'icono5' => '🍹',
-                'bebida' => 'Agua de frutas tropicales'
-            ]
-        ]
-    ],
-    // FEBRERO 2026 - SEMANA 2: 9-13 Febrero
-    'febrero_2' => [
-        'lunes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍈',
-                'descripcion' => 'Melón con yogurt',
-                'icono3' => '🍳',
-                'detalle' => 'Omelette de espinaca'
-            ],
-            'comida' => [
-                'icono' => '⚙️',
-                'nombre' => 'Sopa de engrane',
-                'icono2' => '🐟',
-                'descripcion' => 'Tortitas de atún con ensalada',
-                'icono3' => '🍌',
-                'postre' => 'Plátanos con crema',
-                'icono4' => '🍈',
-                'bebida' => 'Agua de papaya'
-            ]
-        ],
-        'martes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍞',
-                'descripcion' => 'Pan tostado con Nutella',
-                'icono3' => '🥘',
-                'detalle' => 'Chilaquiles de frijol con pollo'
-            ],
-            'comida' => [
-                'icono' => '🍝',
-                'nombre' => 'Espagueti rojo',
-                'icono2' => '🥩',
-                'descripcion' => 'Chuleta ahumada con papas al limón',
-                'icono3' => '🍮',
-                'postre' => 'Gelatina bicolor leche',
-                'icono4' => '🍈',
-                'bebida' => 'Agua de melón'
-            ]
-        ],
-        'miercoles' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🥣',
-                'descripcion' => 'Avena con leche',
-                'icono3' => '🥪',
-                'detalle' => 'Sandwich de jamón y panela'
-            ],
-            'comida' => [
-                'icono' => '🍚',
-                'nombre' => 'Arroz verde',
-                'icono2' => '🍗',
-                'descripcion' => 'Pollo en mole verde con frijoles',
-                'icono3' => '🍎',
-                'postre' => 'Ensalada de manzana',
-                'icono4' => '🍋',
-                'bebida' => 'Agua de limón'
-            ]
-        ],
-        'jueves' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍎',
-                'descripcion' => 'Manzana con yogurt',
-                'icono3' => '🌶️',
-                'detalle' => 'Enchiladas rojas'
-            ],
-            'comida' => [
-                'icono' => '🍲',
-                'nombre' => 'Consome de verdura',
-                'icono2' => '🥔',
-                'descripcion' => 'Tortitas de papa con ensalada',
-                'icono3' => '🌈',
-                'postre' => 'Gelatina mosaico',
-                'icono4' => '🍌',
-                'bebida' => 'Agua de plátano'
-            ]
-        ],
-        'viernes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🥤',
-                'descripcion' => 'Licuado de granola',
-                'icono3' => '🍳',
-                'detalle' => 'Huevos divorciados'
-            ],
-            'comida' => [
-                'icono' => '🍚',
-                'nombre' => 'Arroz con plátano',
-                'icono2' => '🥘',
-                'descripcion' => 'Tortitas de carne en salsa verde',
-                'icono3' => '🫘',
-                'detalle2' => 'Con frijoles',
-                'icono4' => '🌰',
-                'postre' => 'Alegrías',
-                'icono5' => '🍹',
-                'bebida' => 'Agua de frutas'
-            ]
-        ]
-    ],
-    // FEBRERO 2026 - SEMANA 3: 16-20 Febrero
-    'febrero_3' => [
-        'lunes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍌',
-                'descripcion' => 'Plátano con yogurt',
-                'icono3' => '🍳',
-                'detalle' => 'Huevos con tocino'
-            ],
-            'comida' => [
-                'icono' => '🔤',
-                'nombre' => 'Sopa de letra',
-                'icono2' => '🐟',
-                'descripcion' => 'Tostadas de atún a la mexicana',
-                'icono3' => '🥜',
-                'postre' => 'Pepitorias',
-                'icono4' => '🥒',
-                'bebida' => 'Agua de pepino con limón'
-            ]
-        ],
-        'martes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍞',
-                'descripcion' => 'Pan tostado con mantequilla',
-                'icono3' => '🧀',
-                'detalle' => 'Queso a la mexicana'
-            ],
-            'comida' => [
-                'icono' => '🍚',
-                'nombre' => 'Arroz rojo',
-                'icono2' => '🍡',
-                'descripcion' => 'Albóndigas con frijoles',
-                'icono3' => '🥛',
-                'postre' => 'Arroz con leche',
-                'icono4' => '🍍',
-                'bebida' => 'Agua de piña'
-            ]
-        ],
-        'miercoles' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍉',
-                'descripcion' => 'Sandía con piña',
-                'icono3' => '🥐',
-                'detalle' => 'Cuernito de jamón y panela'
-            ],
-            'comida' => [
-                'icono' => '🍝',
-                'nombre' => 'Espagueti bologñesa',
-                'icono2' => '🍗',
-                'descripcion' => 'Milanesa de pollo con ensalada rusa',
-                'icono3' => '🥜',
-                'postre' => 'Gelatina de nuez',
-                'icono4' => '🍈',
-                'bebida' => 'Agua de guayaba'
-            ]
-        ],
-        'jueves' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🥛',
-                'descripcion' => 'Yogurt con granola',
-                'icono3' => '🥮',
-                'detalle' => 'Sopes con nopales'
-            ],
-            'comida' => [
-                'icono' => '🍲',
-                'nombre' => 'Consome de pollo',
-                'icono2' => '🥗',
-                'descripcion' => 'Ensalada mediterránea',
-                'icono3' => '💧',
-                'postre' => 'Gelatina bicolor agua',
-                'icono4' => '🍉',
-                'bebida' => 'Agua de sandía'
-            ]
-        ],
-        'viernes' => [
-            'desayuno' => [
-                'icono' => '☕',
-                'nombre' => 'Café o Té',
-                'icono2' => '🍈',
-                'descripcion' => 'Melón con papaya',
-                'icono3' => '🥘',
-                'detalle' => 'Chilaquiles en morita con huevo'
-            ],
-            'comida' => [
-                'icono' => '🍚',
-                'nombre' => 'Arroz con salchicha',
-                'icono2' => '🐷',
-                'descripcion' => 'Rollo de cerdo en pasilla con frijoles',
-                'icono3' => '🍓',
-                'postre' => 'Helado de fresa',
-                'icono4' => '🌾',
-                'bebida' => 'Agua de horchata'
-            ]
-        ]
-    ],
-    // FEBRERO 2026 - SEMANA 4: 23-27 Febrero
+    // FEBRERO 2026 - SEMANA 4: 23-27 Febrero (ACTIVA)
     'febrero_4' => [
         'lunes' => [
             'desayuno' => [
@@ -761,6 +352,416 @@ $menus_completos = [
                 'bebida' => 'Agua de tamarindo'
             ]
         ]
+    ],
+    // MARZO 2026 - SEMANA 1: 2-6 Marzo
+    'marzo_1' => [
+        'lunes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🥣',
+                'descripcion' => 'Avena con plátano',
+                'icono3' => '🍳',
+                'detalle' => 'Huevo en salsa pasilla'
+            ],
+            'comida' => [
+                'icono' => '🍚',
+                'nombre' => 'Arroz rojo',
+                'icono2' => '🍖',
+                'descripcion' => 'Chicharrón en salsa verde con frijoles',
+                'icono3' => '🍑',
+                'postre' => 'Duraznos con crema',
+                'icono4' => '🍋',
+                'bebida' => 'Agua de limón'
+            ]
+        ],
+        'martes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍈',
+                'descripcion' => 'Papaya con yogurt',
+                'icono3' => '🌯',
+                'detalle' => 'Burrito de bistec'
+            ],
+            'comida' => [
+                'icono' => '🍲',
+                'nombre' => 'Sopa de lengua',
+                'icono2' => '🍲',
+                'descripcion' => 'Pastel azteca con frijoles',
+                'icono3' => '🌈',
+                'postre' => 'Gelatina bicolor de leche',
+                'icono4' => '🍊',
+                'bebida' => 'Agua de naranja'
+            ]
+        ],
+        'miercoles' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍉',
+                'descripcion' => 'Sandía con miel y granola',
+                'icono3' => '🍳',
+                'detalle' => 'Omelette de queso panela'
+            ],
+            'comida' => [
+                'icono' => '🌮',
+                'nombre' => 'Tacos de carnitas',
+                'icono2' => '3️⃣',
+                'descripcion' => '3 piezas',
+                'icono3' => '🍋',
+                'postre' => 'Chamoyada de limón',
+                'icono4' => '🍈',
+                'bebida' => 'Agua de guayaba'
+            ]
+        ],
+        'jueves' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍎',
+                'descripcion' => 'Manzana con yogurt',
+                'icono3' => '🌶️',
+                'detalle' => 'Chilaquiles rojos con huevo'
+            ],
+            'comida' => [
+                'icono' => '🍚',
+                'nombre' => 'Arroz blanco',
+                'icono2' => '🥘',
+                'descripcion' => 'Mole de olla',
+                'icono3' => '☕',
+                'postre' => 'Flan capuchino',
+                'icono4' => '🍉',
+                'bebida' => 'Agua de sandía'
+            ]
+        ],
+        'viernes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍈',
+                'descripcion' => 'Melón',
+                'icono3' => '🍞',
+                'detalle' => 'Molletes'
+            ],
+            'comida' => [
+                'icono' => '🥧',
+                'nombre' => 'Pastel de papa',
+                'icono2' => '🥗',
+                'descripcion' => 'Con ensalada',
+                'icono3' => '🍰',
+                'postre' => 'Pastel imposible',
+                'icono4' => '🍍',
+                'bebida' => 'Agua de piña'
+            ]
+        ]
+    ],
+    // MARZO 2026 - SEMANA 2: 9-13 Marzo
+    'marzo_2' => [
+        'lunes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍈',
+                'descripcion' => 'Papaya con miel y granola',
+                'icono3' => '🍳',
+                'detalle' => 'Omelette de salchicha'
+            ],
+            'comida' => [
+                'icono' => '🥣',
+                'nombre' => 'Sopa de verdura',
+                'icono2' => '🍗',
+                'descripcion' => 'Muslo asado con verduras',
+                'icono3' => '🍌',
+                'postre' => 'Plátanos con crema',
+                'icono4' => '🍈',
+                'bebida' => 'Agua de papaya'
+            ]
+        ],
+        'martes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍎',
+                'descripcion' => 'Manzana con yogurt',
+                'icono3' => '🥪',
+                'detalle' => 'Sandwich de pechuga asada'
+            ],
+            'comida' => [
+                'icono' => '🥣',
+                'nombre' => 'Caldo tlalpeño',
+                'icono2' => '🫓',
+                'descripcion' => 'Huarache con bistec y nopales',
+                'icono3' => '🌈',
+                'postre' => 'Gelatina bicolor de agua',
+                'icono4' => '🍈',
+                'bebida' => 'Agua de melón'
+            ]
+        ],
+        'miercoles' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍍',
+                'descripcion' => 'Melón con piña',
+                'icono3' => '🌶️',
+                'detalle' => 'Huevo con salsa ranchera'
+            ],
+            'comida' => [
+                'icono' => '🥗',
+                'nombre' => 'Ensalada de col',
+                'icono2' => '🌭',
+                'descripcion' => 'Banderillas 3 piezas',
+                'icono3' => '🍰',
+                'postre' => 'Panqué de nuez',
+                'icono4' => '🌺',
+                'bebida' => 'Agua de Jamaica'
+            ]
+        ],
+        'jueves' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🌶️',
+                'descripcion' => 'Enchiladas verdes con pollo',
+                'icono3' => ''
+            ],
+            'comida' => [
+                'icono' => '🍝',
+                'nombre' => 'Espagueti a la diabla',
+                'icono2' => '🍖',
+                'descripcion' => 'Costillas BBQ con verduras',
+                'icono3' => '🌈',
+                'postre' => 'Gelatina mosaico A/L',
+                'icono4' => '🌰',
+                'bebida' => 'Agua de tamarindo'
+            ]
+        ],
+        'viernes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🥛',
+                'descripcion' => 'Atole de mazapán',
+                'icono3' => '🥪',
+                'detalle' => 'Gringa de milanesa'
+            ],
+            'comida' => [
+                'icono' => '🍚',
+                'nombre' => 'Yakimeshi',
+                'icono2' => '🥗',
+                'descripcion' => 'Tepanyaki vegetariano',
+                'icono3' => '🥧',
+                'postre' => 'Pay de piña',
+                'icono4' => '🍚',
+                'bebida' => 'Agua de horchata'
+            ]
+        ]
+    ],
+    // MARZO 2026 - SEMANA 3: 16-20 Marzo
+    'marzo_3' => [
+        'lunes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍉',
+                'descripcion' => 'Sandía con piña',
+                'icono3' => '🌯',
+                'detalle' => 'Sincronizadas'
+            ],
+            'comida' => [
+                'icono' => '🍚',
+                'nombre' => 'Arroz amarillo',
+                'icono2' => '🥩',
+                'descripcion' => 'Bistec a la mexicana',
+                'icono3' => '🍦',
+                'postre' => 'Helado napolitano',
+                'icono4' => '🥣',
+                'bebida' => 'Agua de avena'
+            ]
+        ],
+        'martes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍈',
+                'descripcion' => 'Papaya con granola',
+                'icono3' => '🌶️',
+                'detalle' => 'Chilaquiles verdes con pollo'
+            ],
+            'comida' => [
+                'icono' => '🍲',
+                'nombre' => 'Sopa de lengua',
+                'icono2' => '🍗',
+                'descripcion' => 'Pollo frito con ensalada rusa',
+                'icono3' => '🌈',
+                'postre' => 'Gelatina bicolor A/L',
+                'icono4' => '🥭',
+                'bebida' => 'Agua de mango'
+            ]
+        ],
+        'miercoles' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍈',
+                'descripcion' => 'Melón',
+                'icono3' => '🍳',
+                'detalle' => 'Tortilla española'
+            ],
+            'comida' => [
+                'icono' => '🥣',
+                'nombre' => 'Consome de pollo',
+                'icono2' => '🌮',
+                'descripcion' => 'Tacos dorados de papa y zanahoria (4 pz)',
+                'icono3' => '🥛',
+                'postre' => 'Arroz con leche',
+                'icono4' => '🥒',
+                'bebida' => 'Agua de pepino'
+            ]
+        ],
+        'jueves' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍌',
+                'descripcion' => 'Plátano con yogurt',
+                'icono3' => '🌭',
+                'detalle' => 'Salchichas a la mexicana'
+            ],
+            'comida' => [
+                'icono' => '🥩',
+                'nombre' => 'Jugo de carne',
+                'icono2' => '🌮',
+                'descripcion' => 'Tacos campechanos 3 piezas',
+                'icono3' => '🍮',
+                'postre' => 'Flan de vainilla',
+                'icono4' => '🍹',
+                'bebida' => 'Agua de frutas tropicales'
+            ]
+        ],
+        'viernes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🥛',
+                'descripcion' => 'Licuado de chocofresa',
+                'icono3' => '🥪',
+                'detalle' => 'Torta de jamón'
+            ],
+            'comida' => [
+                'icono' => '🥗',
+                'nombre' => 'Ensalada con pasta y atún',
+                'icono2' => '🍰',
+                'descripcion' => 'Panqué de almendra',
+                'icono3' => '🍹',
+                'bebida' => 'Agua de té helado',
+                'icono4' => ''
+            ]
+        ]
+    ],
+    // MARZO 2026 - SEMANA 4: 23-27 Marzo
+    'marzo_4' => [
+        'lunes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍍',
+                'descripcion' => 'Papaya con piña',
+                'icono3' => '🧀',
+                'detalle' => 'Quesadillas de jamón 3 piezas'
+            ],
+            'comida' => [
+                'icono' => '🍚',
+                'nombre' => 'Arroz amarillo',
+                'icono2' => '🥩',
+                'descripcion' => 'Bistec en salsa verde con papas',
+                'icono3' => '🍮',
+                'postre' => 'Natilla de vainilla',
+                'icono4' => '🍋',
+                'bebida' => 'Agua de limonada'
+            ]
+        ],
+        'martes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍎',
+                'descripcion' => 'Manzana con granola',
+                'icono3' => '🌶️',
+                'detalle' => 'Enchiladas suizas'
+            ],
+            'comida' => [
+                'icono' => '🍝',
+                'nombre' => 'Espagueti rojo',
+                'icono2' => '🍖',
+                'descripcion' => 'Pacholas 2 pz con ensalada',
+                'icono3' => '🌈',
+                'postre' => 'Gelatina mosaico L/A',
+                'icono4' => '🍍',
+                'bebida' => 'Agua de piña colada'
+            ]
+        ],
+        'miercoles' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍉',
+                'descripcion' => 'Melón con sandía',
+                'icono3' => '🥪',
+                'detalle' => 'Sandwich de jamón y manchego'
+            ],
+            'comida' => [
+                'icono' => '🥣',
+                'nombre' => 'Sopa de verduras',
+                'icono2' => '🥗',
+                'descripcion' => 'Ensalada con pasta y pollo',
+                'icono3' => '🍮',
+                'postre' => 'Flan de cajeta',
+                'icono4' => '🍋',
+                'bebida' => 'Agua de limón con chía'
+            ]
+        ],
+        'jueves' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🍌',
+                'descripcion' => 'Plátanos con yogurt',
+                'icono3' => '🌯',
+                'detalle' => 'Burrito de pastor'
+            ],
+            'comida' => [
+                'icono' => '🍝',
+                'nombre' => 'Pasta pluma al chipotle',
+                'icono2' => '🌭',
+                'descripcion' => 'Hot dogs con tocino 2 piezas',
+                'icono3' => '🍦',
+                'postre' => 'Gelatina yogurt natural',
+                'icono4' => '🍊',
+                'bebida' => 'Agua de naranjada'
+            ]
+        ],
+        'viernes' => [
+            'desayuno' => [
+                'icono' => '☕',
+                'nombre' => 'Café o Té',
+                'icono2' => '🥣',
+                'descripcion' => 'Atole champurrado',
+                'icono3' => '🌶️',
+                'detalle' => 'Mollequiles'
+            ],
+            'comida' => [
+                'icono' => '🍚',
+                'nombre' => 'Arroz blanco',
+                'icono2' => '🐟',
+                'descripcion' => 'Filete rebosado con ensalada',
+                'icono3' => '🧁',
+                'postre' => 'Cup cake de limón',
+                'icono4' => '🍓',
+                'bebida' => 'Agua de fresa con kiwi'
+            ]
+        ]
     ]
 ];
 
@@ -769,27 +770,28 @@ $menus_completos = [
 // ==================================================
 
 $menu_a_mostrar = [];
-if ($mes_seleccionado === 'enero' && $num_semana_seleccionada === 4) {
-    $menu_a_mostrar = $menus_completos['enero_4'];
-} elseif ($mes_seleccionado === 'febrero') {
+if ($mes_seleccionado === 'febrero' && $num_semana_seleccionada === 4) {
+    $menu_a_mostrar = $menus_completos['febrero_4'];
+} elseif ($mes_seleccionado === 'marzo') {
     switch ($num_semana_seleccionada) {
         case 1:
-            $menu_a_mostrar = $menus_completos['febrero_1'];
+            $menu_a_mostrar = $menus_completos['marzo_1'];
             break;
         case 2:
-            $menu_a_mostrar = $menus_completos['febrero_2'];
+            $menu_a_mostrar = $menus_completos['marzo_2'];
             break;
         case 3:
-            $menu_a_mostrar = $menus_completos['febrero_3'];
+            $menu_a_mostrar = $menus_completos['marzo_3'];
             break;
         case 4:
-            $menu_a_mostrar = $menus_completos['febrero_4'];
+            $menu_a_mostrar = $menus_completos['marzo_4'];
             break;
         default:
-            $menu_a_mostrar = $menus_completos['febrero_1'];
+            $menu_a_mostrar = $menus_completos['marzo_1'];
     }
 } else {
-    $menu_a_mostrar = $menus_completos['enero_4'];
+    // Por defecto mostrar la semana activa de febrero
+    $menu_a_mostrar = $menus_completos['febrero_4'];
 }
 
 // ==================================================
@@ -864,26 +866,26 @@ $mes_titulo = '';
 if ($mes_seleccionado && $num_semana_seleccionada > 0) {
     $mes_titulo = ucfirst($mes_seleccionado);
     
-    if ($mes_seleccionado === 'enero' && $num_semana_seleccionada === 4) {
-        $titulo_semana = 'Semana 4: 26-30 Enero 2026';
-        $rango_fechas = '26 al 30 de Enero 2026';
-    } elseif ($mes_seleccionado === 'febrero') {
+    if ($mes_seleccionado === 'febrero' && $num_semana_seleccionada === 4) {
+        $titulo_semana = 'Semana 4: 23-27 Febrero 2026 (ACTIVA)';
+        $rango_fechas = '23 al 27 de Febrero 2026';
+    } elseif ($mes_seleccionado === 'marzo') {
         switch ($num_semana_seleccionada) {
             case 1:
-                $titulo_semana = 'Semana 1: 3-6 Febrero 2026';
-                $rango_fechas = 'Martes 3 al Viernes 6 de Febrero 2026';
+                $titulo_semana = 'Semana 1: 2-6 Marzo 2026';
+                $rango_fechas = '2 al 6 de Marzo 2026';
                 break;
             case 2:
-                $titulo_semana = 'Semana 2: 9-13 Febrero 2026';
-                $rango_fechas = '9 al 13 de Febrero 2026';
+                $titulo_semana = 'Semana 2: 9-13 Marzo 2026';
+                $rango_fechas = '9 al 13 de Marzo 2026';
                 break;
             case 3:
-                $titulo_semana = 'Semana 3: 16-20 Febrero 2026';
-                $rango_fechas = '16 al 20 de Febrero 2026';
+                $titulo_semana = 'Semana 3: 16-20 Marzo 2026';
+                $rango_fechas = '16 al 20 de Marzo 2026';
                 break;
             case 4:
-                $titulo_semana = 'Semana 4: 23-27 Febrero 2026';
-                $rango_fechas = '23 al 27 de Febrero 2026';
+                $titulo_semana = 'Semana 4: 23-27 Marzo 2026';
+                $rango_fechas = '23 al 27 de Marzo 2026';
                 break;
         }
     }
@@ -905,7 +907,7 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sistema de Pedidos - Comedor Enero/Febrero 2026</title>
+  <title>Sistema de Pedidos - Comedor Febrero/Marzo 2026</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -927,11 +929,11 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
       --desayuno-color: #f59e0b;
       --comida-color: #10b981;
       --sin-servicio-color: #94a3b8;
-      --enero-color: #4a80b5;
-      --febrero-1: #10b981;
-      --febrero-2: #8b5cf6;
-      --febrero-3: #f59e0b;
       --febrero-4: #ec4899;
+      --marzo-1: #10b981;
+      --marzo-2: #8b5cf6;
+      --marzo-3: #f59e0b;
+      --marzo-4: #ec4899;
       --gold-gradient: linear-gradient(135deg, #FFD700 0%, #FFC700 25%, #FFAA00 50%, #FF8C00 75%, #FF6B00 100%);
       --silver-gradient: linear-gradient(135deg, #C0C0C0 0%, #D3D3D3 25%, #E8E8E8 50%, #F0F0F0 75%, #F8F8F8 100%);
     }
@@ -1506,32 +1508,32 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
       font-weight: 600;
     }
 
-    .week-indicator.enero {
-      color: var(--enero-color);
-      border-color: rgba(74, 128, 181, 0.3);
-      background: rgba(74, 128, 181, 0.1);
+    .week-indicator.febrero-4 {
+      color: var(--febrero-4);
+      border-color: rgba(236, 72, 153, 0.3);
+      background: rgba(236, 72, 153, 0.1);
     }
 
-    .week-indicator.febrero-1 {
-      color: var(--febrero-1);
+    .week-indicator.marzo-1 {
+      color: var(--marzo-1);
       border-color: rgba(16, 185, 129, 0.3);
       background: rgba(16, 185, 129, 0.1);
     }
 
-    .week-indicator.febrero-2 {
-      color: var(--febrero-2);
+    .week-indicator.marzo-2 {
+      color: var(--marzo-2);
       border-color: rgba(139, 92, 246, 0.3);
       background: rgba(139, 92, 246, 0.1);
     }
 
-    .week-indicator.febrero-3 {
-      color: var(--febrero-3);
+    .week-indicator.marzo-3 {
+      color: var(--marzo-3);
       border-color: rgba(245, 158, 11, 0.3);
       background: rgba(245, 158, 11, 0.1);
     }
 
-    .week-indicator.febrero-4 {
-      color: var(--febrero-4);
+    .week-indicator.marzo-4 {
+      color: var(--marzo-4);
       border-color: rgba(236, 72, 153, 0.3);
       background: rgba(236, 72, 153, 0.1);
     }
@@ -1711,7 +1713,6 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
     <div class="user-detail">
       <i class="fas fa-user-circle"></i>
       <span><strong>Usuario:</strong> <?php echo htmlspecialchars($user_name); ?></span>
-      <span><strong>Avance 1:</strong></span>
     </div>
     <div class="user-detail">
       <i class="fas fa-building"></i>
@@ -1730,7 +1731,7 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
   <?php if ($mes_titulo && $num_semana_seleccionada > 0): ?>
     Menú <?php echo $mes_titulo; ?> 2026 - <?php echo $titulo_semana; ?>
   <?php else: ?>
-    Sistema de Pedidos - Comedor Enero/Febrero 2026
+    Sistema de Pedidos - Comedor Febrero/Marzo 2026
   <?php endif; ?>
 </div>
 
@@ -1758,13 +1759,11 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
 
 <!-- Indicador de semana -->
 <?php if ($mes_seleccionado && $num_semana_seleccionada > 0): ?>
-<div class="week-indicator <?php echo $mes_seleccionado; ?><?php echo ($mes_seleccionado === 'febrero') ? '-' . $num_semana_seleccionada : ''; ?>">
+<div class="week-indicator <?php echo $mes_seleccionado; ?>-<?php echo $num_semana_seleccionada; ?>">
   <i class="fas fa-calendar-week"></i>
-  <?php if ($mes_seleccionado === 'enero'): ?>
-    Última semana de Enero: <?php echo $rango_fechas; ?>
-  <?php elseif ($mes_seleccionado === 'febrero' && $num_semana_seleccionada === 1): ?>
-    Semana del <?php echo $rango_fechas; ?> (Lunes sin servicio)
-  <?php else: ?>
+  <?php if ($mes_seleccionado === 'febrero' && $num_semana_seleccionada === 4): ?>
+    Semana del <?php echo $rango_fechas; ?> ⭐ ACTIVA
+  <?php elseif ($mes_seleccionado === 'marzo'): ?>
     Semana del <?php echo $rango_fechas; ?>
   <?php endif; ?>
   <?php if ($diferencia_dias <= 2): ?>
@@ -1823,7 +1822,7 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
         </option>
       <?php endforeach; ?>
     </select>
-    <span class="field-note">Selecciona una semana de enero/febrero 2026</span>
+    <span class="field-note">Semana del 23-27 Febrero 2026 ACTIVA</span>
   </div>
 </div>
 
@@ -1851,9 +1850,9 @@ $diferencia_dias = $hoy_objeto->diff($semana_seleccionada_objeto)->days;
         $comida_id = $info[2];
         $menu_dia = $menu_a_mostrar[$clave] ?? [];
         
-        // Determinar si es sin servicio
-        $desayuno_sin_servicio = isset($menu_dia['desayuno']['sin_servicio']) && $menu_dia['desayuno']['sin_servicio'];
-        $comida_sin_servicio = isset($menu_dia['comida']['sin_servicio']) && $menu_dia['comida']['sin_servicio'];
+        // Determinar si es sin servicio (todos tienen servicio)
+        $desayuno_sin_servicio = false;
+        $comida_sin_servicio = false;
     ?>
     <div class='day-card'>
         <h3><?php echo $dia_nombre; ?></h3>

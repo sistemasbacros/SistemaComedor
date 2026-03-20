@@ -6,11 +6,11 @@
 // Configuración de sesión
 session_set_cookie_params([
     'lifetime' => 0,
-    'path' => '/',  // Cambiado a raíz para compatibilidad con Docker
+    'path' => '/Comedor/',
     'domain' => '',
     'secure' => false,
     'httponly' => true,
-    'samesite' => 'Lax'  // Cambiado de Strict a Lax para mejor compatibilidad
+    'samesite' => 'Strict'
 ]);
 
 // Configuración de seguridad
@@ -19,15 +19,6 @@ header("Pragma: no-cache");
 header("Expires: 0");
 
 session_start();
-
-// DEBUG: Ver estado de sesión
-error_log("=== DEBUG MenUsuario.php ===");
-error_log("Session ID actual: " . session_id());
-error_log("Session ID guardado: " . ($_SESSION['session_id'] ?? 'NO EXISTE'));
-error_log("authenticated_from_login: " . (isset($_SESSION['authenticated_from_login']) ? ($_SESSION['authenticated_from_login'] ? 'true' : 'false') : 'NO EXISTE'));
-error_log("browser_fingerprint guardado: " . ($_SESSION['browser_fingerprint'] ?? 'NO EXISTE'));
-error_log("browser_fingerprint actual: " . md5($_SERVER['HTTP_USER_AGENT'] . $_SERVER['REMOTE_ADDR']));
-error_log("user_name: " . ($_SESSION['user_name'] ?? 'NO EXISTE'));
 
 // Verificación estricta de autenticación - CORREGIDO
 $isAuthenticated = (
@@ -39,28 +30,25 @@ $isAuthenticated = (
     $_SESSION['browser_fingerprint'] === md5($_SERVER['HTTP_USER_AGENT'] . $_SERVER['REMOTE_ADDR'])
 );
 
-error_log("isAuthenticated: " . ($isAuthenticated ? 'SI' : 'NO'));
-
 // Permitir acceso durante el mismo request después de procesar POST
 if (!$isAuthenticated) {
-    error_log("FALLÓ AUTENTICACIÓN - Redirigiendo a Admiin.php");
     // Destruir completamente la sesión
     session_unset();
     session_destroy();
     setcookie(session_name(), '', time()-3600, '/');
     
     // Redirigir al login
-    header("Location: Admiin.php");
+    header("Location: " . getenv('APP_URL') . "/Admiin.php");
     exit;
 }
 
-// Verificar expiración de sesión (30 minutos)
-$sessionTimeout = 30 * 60; // 30 minutos
+// Verificar expiración de sesión (2 minutos - muy corto)
+$sessionTimeout = 2 * 60; // 2 minutos
 if (isset($_SESSION['LOGIN_TIME']) && (time() - $_SESSION['LOGIN_TIME'] > $sessionTimeout)) {
     session_unset();
     session_destroy();
     setcookie(session_name(), '', time()-3600, '/');
-    header("Location: Admiin.php");
+    header("Location: " . getenv('APP_URL') . "/Admiin.php");
     exit;
 }
 
@@ -87,8 +75,8 @@ $dia_semana = date('N');
 $hora_actual = date('H:i');
 
 // Bloquear desde jueves 13:00 hasta domingo 23:59
-if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
-    $dia_semana == 4 || // Viernes completo
+if (($dia_semana == 4 && $hora_actual >= '12:38') || // Jueves desde 13:00
+ // $dia_semana == 4 || // Viernes completo
     $dia_semana == 5 || // Viernes completo
     $dia_semana == 6 || // Sábado completo
     ($dia_semana == 7 && $hora_actual <= '23:59')) { // Domingo hasta 23:59
@@ -719,6 +707,12 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     <?php endif; ?>
                 </a>
             </li>
+            <!-- NUEVO MÓDULO: CONSUMOS DISPONIBLES -->
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-section="consumos">
+                    <i class="fas fa-hand-holding-heart"></i> Consumos Disponibles
+                </a>
+            </li>
             <li class="nav-item">
                 <a class="nav-link" href="#" data-section="consulta">
                     <i class="fas fa-search"></i> Consulta tus registros por semana
@@ -735,7 +729,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                 </a>
             </li>
             <li class="nav-item mt-auto">
-                <a class="nav-link text-danger" href="admicome4.php?logout=true" id="logoutBtn">
+                <a class="nav-link text-danger" href="<?php echo getenv('APP_URL'); ?>/admicome4.php?logout=true" id="logoutBtn">
                     <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
                 </a>
             </li>
@@ -767,7 +761,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
             </div>
         </div>
 
-        <!-- Sección de Pedidos (ahora será la primera que se muestre) -->
+        <!-- Sección de Pedidos -->
         <div id="pedidos" class="section active">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center <?php echo $PEDIDOS_BLOQUEADOS ? 'blocked' : ''; ?>">
@@ -812,13 +806,45 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     <?php else: ?>
                         <!-- Contenedor del iframe (solo si no está bloqueado) -->
                         <div class="report-iframe-container">
-                            <iframe src="Menpedidos1.php" 
+                            <iframe src="<?php echo getenv('APP_URL'); ?>/Menpedidos1.php"
                                     class="report-iframe" 
                                     id="pedidos-iframe"
                                     onload="hideLoading('pedidos-loading')">
                             </iframe>
                         </div>
                     <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- NUEVA SECCIÓN: Consumos Disponibles -->
+        <div id="consumos" class="section">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <i class="fas fa-hand-holding-heart me-2"></i>Sistema de Consumos Disponibles
+                    </div>
+                    <div>
+                        <button class="btn btn-sm btn-primary" id="refresh-consumos-btn">
+                            <i class="fas fa-sync-alt me-1"></i>Actualizar
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0 position-relative">
+                    <!-- Indicador de carga para Consumos -->
+                    <div id="consumos-loading" class="loading-overlay">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">Cargando sistema de consumos disponibles...</div>
+                    </div>
+                    
+                    <!-- Contenedor del iframe -->
+                    <div class="report-iframe-container">
+                        <iframe src="<?php echo getenv('APP_URL'); ?>/aparta_consumo_modificado.php?integrated=true"
+                                class="report-iframe" 
+                                id="consumos-iframe"
+                                onload="hideLoading('consumos-loading')">
+                        </iframe>
+                    </div>
                 </div>
             </div>
         </div>
@@ -845,7 +871,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     
                     <!-- Contenedor del iframe -->
                     <div class="report-iframe-container">
-                        <iframe src="AgendaPedidos1.php" 
+                        <iframe src="<?php echo getenv('APP_URL'); ?>/AgendaPedidos1.php"
                                 class="report-iframe" 
                                 id="consulta-iframe"
                                 onload="hideLoading('consulta-loading')">
@@ -877,7 +903,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     
                     <!-- Contenedor del iframe -->
                     <div class="report-iframe-container">
-                        <iframe src="descUsuario.php" 
+                        <iframe src="<?php echo getenv('APP_URL'); ?>/descUsuario.php"
                                 class="report-iframe" 
                                 id="reporte-iframe"
                                 onload="hideLoading('reporte-loading')">
@@ -909,7 +935,7 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     
                     <!-- Contenedor del iframe con fallback mejorado -->
                     <div class="report-iframe-container">
-                        <iframe src="GenerarQR1.php" 
+                        <iframe src="<?php echo getenv('APP_URL'); ?>/GenerarQR1.php"
                                 class="report-iframe" 
                                 id="qr-iframe"
                                 onload="hideLoading('qr-loading')">
@@ -1071,6 +1097,17 @@ if (($dia_semana == 3 && $hora_actual >= '16:30') || // Jueves desde 13:00
                     iframe.src = iframe.src;
                 }
             <?php endif; ?>
+        });
+
+        // NUEVO: Botón de actualización para Consumos Disponibles
+        document.getElementById('refresh-consumos-btn').addEventListener('click', function() {
+            const iframe = document.getElementById('consumos-iframe');
+            const loading = document.getElementById('consumos-loading');
+            
+            if (loading && iframe) {
+                loading.style.display = 'flex';
+                iframe.src = iframe.src;
+            }
         });
 
         document.getElementById('refresh-consulta-btn').addEventListener('click', function() {

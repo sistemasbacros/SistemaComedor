@@ -1,111 +1,249 @@
 <?php
-/**
- * @file dchef.php
- * @brief Dashboard principal del Chef para gestión operativa de comidas en tiempo real.
- *
- * @description
- * Módulo central de operaciones de cocina. Proporciona al Chef una interfaz completa
- * para gestionar todos los aspectos del servicio diario de alimentos:
- *
- *  - Módulo "Comidas a Servir": lista en tiempo real de empleados con comida registrada
- *    hoy, con opción de marcar cada comida como ATENDIDA via AJAX.
- *  - Módulo "Complementos": lista de complementos (café, té, etc.) del día, con
- *    capacidad de marcarlos como atendidos.
- *  - Módulo "Registros de Comida": formulario manual para crear registros de comida
- *    ad hoc (para casos no registrados en el sistema normal).
- *  - Módulo "Asignar Comidas": gestión de cancelaciones aprobadas del día; el Chef
- *    puede asignar o liberar un espacio a otro empleado.
- *  - Módulo "Configuración": muestra información del usuario y conexión a BD (solo lectura).
- *
- * La autenticación es propia del archivo (usuario/contraseña fija: chef/chef1234).
- * La sesión PHP se gestiona en $_SESSION['usuario'].
- * Las acciones AJAX llegan via $_GET['action'] y devuelven JSON.
- * La UI se actualiza automáticamente cada 30 segundos mediante setInterval.
- *
- * @module Módulo de Cocina
- * @access Chef (autenticación local propia; independiente del sistema general de sesiones)
- *
- * @dependencies
- * - Librerías JS CDN:
- *   - Bootstrap 5.3.0 (JS + CSS): layout y componentes modales
- *   - Font Awesome 6.4.0: iconografía
- *   - Google Fonts (Inter): tipografía
- *   - SweetAlert2 11: alertas y confirmaciones
- *   - Flatpickr (JS + CSS + locale es): selector de fecha y hora
- * - PHP: extensión sqlsrv (Microsoft SQL Server)
- * @note Este archivo NO utiliza config/database.php — gestiona su propia conexión
- *       con credenciales hardcodeadas. Pendiente de migración a .env.
- *
- * @database
- * - Tablas:
- *   - Entradas: registros de comidas diarias (lectura y actualización de estatus)
- *   - complementos: registros de complementos diarios (lectura y actualización)
- *   - Cancelaciones: cancelaciones aprobadas del día (lectura, UPDATE asignación/liberación)
- *   - ConPed: catálogo de empleados con pedido (lectura para select de asignación)
- *   - entradas: registro manual de comidas (INSERT)
- * - Operaciones: SELECT, UPDATE, INSERT
- *
- * @session
- * - $_SESSION['usuario']['nombre']: nombre del chef autenticado
- * - $_SESSION['usuario']['rol']: rol del usuario (siempre 'chef')
- * - $_SESSION['usuario']['logueado']: bandera booleana de sesión activa
- *
- * @inputs
- * - $_GET['action']: acción AJAX a ejecutar (get_comidas, get_estadisticas,
- *   marcar_atendido, get_complementos, get_estadisticas_complementos,
- *   marcar_complemento_atendido, get_cancelaciones, asignar_cancelacion,
- *   liberar_cancelacion, crear_registro_comida, get_registros_hoy)
- * - $_GET['page']: módulo a mostrar (comidas, complementos, registros, asignar, configuracion)
- * - $_GET['logout']: si está presente, destruye la sesión
- * - $_POST['login'] + $_POST['usuario'] + $_POST['contrasena']: autenticación
- * - $_POST['nombre'], $_POST['hora_entrada'], $_POST['fecha_hora']: marcar comida atendida
- * - $_POST['nombre'], $_POST['complemento'], $_POST['fecha'], $_POST['hora']: marcar complemento
- * - $_POST['nombre_cancelacion'], $_POST['tipo_consumo'], $_POST['fecha_cancelacion'],
- *   $_POST['id_persona'], $_POST['nombre_persona']: asignar cancelación
- * - $_POST['nombre_corto'], $_POST['fecha_real'], $_POST['hora_real']: crear registro manual
- *
- * @outputs
- * - HTML completo (dashboard con sidebar y navbar) cuando se accede normalmente
- * - JSON (application/json) cuando se invoca con $_GET['action']
- *
- * @security
- * - Autenticación mediante sesión PHP administrada localmente
- * - Las funciones asignarCancelacion() y liberarCancelacion() verifican que haya sesión activa
- * - Las operaciones UPDATE utilizan parámetros enlazados (prepared statements de sqlsrv)
- *   para evitar inyección SQL
- * - La función crearRegistroComida() valida formato de fecha (dd-mm-yyyy) y hora (HH:MM:SS)
- *   con expresiones regulares antes de ejecutar el INSERT
- * @uses getComedorConnection() Conexión centralizada desde config/database.php.
- * @warning La contraseña de autenticación del Chef está hardcodeada (chef/chef1234).
- *          Debe migrarse a un mecanismo de autenticación centralizado.
- *
- * @author Equipo Tecnología BacroCorp
- * @version 1.4
- * @since 2024
- * @updated 2026-02-18
- */
-
 // =============================================
-// DASHBOARD CHEF - SISTEMA COMPLETO CON COMPLEMENTOS Y REGISTROS
+// DASHBOARD CHEF - VERSIÓN FINAL COMPLETA Y FUNCIONAL
+// CON BADGES DE ESTADO CORREGIDOS (DESAYUNO/COMIDA AGENDADO)
 // =============================================
 
 session_start();
 
+// Configuración de conexión a la base de datos
 require_once __DIR__ . '/config/database.php';
 
+// Función para obtener conexión
 function getConnection() {
     $conn = getComedorConnection();
     if ($conn === false) {
-        die(json_encode(['success' => false, 'message' => 'Error de conexión a la base de datos.']));
+        die(json_encode(['success' => false, 'message' => 'Error de conexión a la base de datos']));
     }
     return $conn;
+}
+
+// =============================================
+// OBTENER PEDIDOS DE LA SEMANA ACTUAL
+// =============================================
+
+function getPedidosSemana() {
+    $conn = getConnection();
+    
+    $sql = "
+    WITH SemanaActual AS (
+        SELECT *
+        FROM PedidosComida
+        WHERE Fecha = DATEADD(WEEK, DATEDIFF(WEEK, 0, GETDATE()), 0)
+    ),
+    Unpivoted AS (
+        SELECT 
+            Id_Empleado,
+            Usuario,
+            Fecha,
+            Dia,
+            Consumo
+        FROM SemanaActual
+        UNPIVOT (
+            Consumo FOR Dia IN (Lunes, Martes, Miercoles, Jueves, Viernes)
+        ) u
+    )
+    SELECT 
+        u.Id_Empleado,
+        u.Usuario,
+        c.Nombre,
+        CONVERT(DATE,
+            DATEADD(DAY,
+                CASE u.Dia
+                    WHEN 'Lunes' THEN 0
+                    WHEN 'Martes' THEN 1
+                    WHEN 'Miercoles' THEN 2
+                    WHEN 'Jueves' THEN 3
+                    WHEN 'Viernes' THEN 4
+                END,
+                u.Fecha
+            )
+        ) AS FechaReal,
+        u.Consumo
+    FROM Unpivoted u
+    LEFT JOIN ConPed c 
+        ON u.Usuario = c.Usuario
+    WHERE u.Consumo IS NOT NULL
+    ORDER BY u.Usuario, FechaReal";
+    
+    $stmt = sqlsrv_query($conn, $sql);
+    
+    $pedidos = [];
+    if ($stmt) {
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $pedidos[] = $row;
+        }
+        sqlsrv_free_stmt($stmt);
+    }
+    
+    sqlsrv_close($conn);
+    return $pedidos;
+}
+
+// =============================================
+// DEFINICIÓN DE HORARIOS Y BLOQUES
+// =============================================
+
+$horariosComedor = [
+    'desayuno' => [
+        'bloque1' => ['inicio' => '08:30', 'fin' => '08:50', 'nombre' => 'BLOQUE 1 - Desayuno'],
+        'bloque2' => ['inicio' => '08:55', 'fin' => '09:15', 'nombre' => 'BLOQUE 2 - Desayuno'],
+        'bloque3' => ['inicio' => '09:20', 'fin' => '09:40', 'nombre' => 'BLOQUE 3 - Desayuno'],
+        'bloque4' => ['inicio' => '09:45', 'fin' => '10:05', 'nombre' => 'BLOQUE 4 - Desayuno']
+    ],
+    'comida' => [
+        'bloque1' => ['inicio' => '13:00', 'fin' => '13:30', 'nombre' => 'BLOQUE 1 - Comida'],
+        'bloque2' => ['inicio' => '13:35', 'fin' => '14:05', 'nombre' => 'BLOQUE 2 - Comida'],
+        'bloque3' => ['inicio' => '14:10', 'fin' => '14:40', 'nombre' => 'BLOQUE 3 - Comida'],
+        'bloque4' => ['inicio' => '14:45', 'fin' => '15:15', 'nombre' => 'BLOQUE 4 - Comida']
+    ]
+];
+
+// LISTA COMPLETA DE PERSONAL POR BLOQUE (MANTENIENDO TU LISTA ORIGINAL)
+$personalBloque1 = [
+    ['nombre' => 'RIVERA SOLANO MARCELINO', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'ANTONIO SANCHEZ ARIEL', 'depto' => 'SISTEMAS'],
+    ['nombre' => 'ARIZMENDI GOMEZ AIDA YAMILETH', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'ARRIAGA GOMEZ ANA MARIA', 'depto' => 'FINANZAS'],
+    ['nombre' => 'CARBAJAL VALENZUELA LORENZO ARMANDO', 'depto' => 'GESTION'],
+    ['nombre' => 'CARMONA NAVA ROSA', 'depto' => 'FACTURACION'],
+    ['nombre' => 'CORTES MORALES MARIA JOVITA', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'HERRERA HERNANDEZ MARIANA CITLALI', 'depto' => 'FINANZAS'],
+    ['nombre' => 'LUNA CASTRO MIGUEL ANGEL', 'depto' => 'GESTION'],
+    ['nombre' => 'NAVA GARCIA MONSERRAT', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'PEREZ MIRANDA ROJER MILTON', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'PIÑA ROMERO RUBEN JESUS', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'SANCHEZ MENDOZA IVAN', 'depto' => 'LICITACIONES'],
+    ['nombre' => 'URIBE FERNANDEZ ADRIANA CECILIA', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'JORGE ALEJANDRO VELASCO PEREZ', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'XOLOCOTZI GONZALEZ ELIZABETH', 'depto' => 'SERVICIOS GENERALES'],
+    ['nombre' => 'BENITEZ PADILLA LILIANA', 'depto' => 'ELEVADORES'],
+    ['nombre' => 'DE NOVA GARDUÑO EDUARDO', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'SALINAS GONZALES YASMIN', 'depto' => 'TALENTO HUMANO'],
+    ['nombre' => 'DURAN MIRANDA ELISA SARAIH', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'RODRIGUEZ GARIBAY KAREN', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'MANCILLA VELAZQUEZ ELIZABETH JOHANA', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'REYES REBOLLAR JESUS EMMANUEL', 'depto' => 'AUDITORIA'],
+    ['nombre' => 'PAMELA LIZBETH GARCIA CRUZ', 'depto' => 'OBRA CIVIL'],
+    ['nombre' => 'BORIS KELVIN RAMIREZ NEYRA', 'depto' => 'TI'],
+    ['nombre' => 'JESUS ARMANDO GONZALEZ ARIAS', 'depto' => 'LICITACIONES'],
+    ['nombre' => 'ANGEL DE JESUS CONTRERAS MORENO', 'depto' => 'TALENTO HUMANO'],
+    ['nombre' => 'VERONICA GARCIA ACEVEDO', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'PEREZ SANCHEZ ALAM NOE', 'depto' => 'ADMINISTRACION']
+];
+
+$personalBloque2 = [
+    ['nombre' => 'AGUIRRE FLORES OFELIA', 'depto' => 'SERVICIOS GENERALES'],
+    ['nombre' => 'AVILES AGUIRRE JAZMIN', 'depto' => 'FINANZAS'],
+    ['nombre' => 'BECERRIL GARCIA LUIS MIGUEL', 'depto' => 'SISTEMAS'],
+    ['nombre' => 'BERNAL JUAREZ MARISOL', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'CABALLERO LUNA ROSA ELENA', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'CERNA HERNANDEZ BEATRIZ ALEJANDRA', 'depto' => 'LICITACIONES'],
+    ['nombre' => 'CIENEGA JASSO MIRIAM', 'depto' => 'TALENTO HUMANO'],
+    ['nombre' => 'GALICIA DOMINGUEZ ADRIANA', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'MAIRA RAMIREZ VELAZQUEZ', 'depto' => 'FINANZAS'],
+    ['nombre' => 'REYES FONSECA NORMA ANGELICA', 'depto' => 'SERVICIOS GENERALES'],
+    ['nombre' => 'VIOLETA URIA ESTRADA', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'CELAYA YAXI LUIS ENRIQUE', 'depto' => 'FINANZAS'],
+    ['nombre' => 'FIRO CORTAZAR FERNANDO', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'VENTOLERO GUADARRAMA JAQUELINE', 'depto' => 'AUDITORIA'],
+    ['nombre' => 'MEDINA MALDONADO ARMANDO KHIN', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'FABELA LOPEZ JUAN DANIEL', 'depto' => 'CONTABILIDAD'],
+    ['nombre' => 'ADAME GARCIA JOSE PAUL', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'HERRERA CUALI HUGO ALEJANDRO', 'depto' => 'TALENTO HUMANO'],
+    ['nombre' => 'COLIN ESQUIVEL CESAR ALBERTO', 'depto' => 'AUDITORIA'],
+    ['nombre' => 'SALGADO OROZCO SERGIO JAVIER', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'GARCIA CARDENAS DIANA ESTEFANIA', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'GONZALEZ HERNANDEZ TANIA', 'depto' => 'CONTABILIDAD'],
+    ['nombre' => 'GONZALEZ VELAZQUEZ MIGUEL ANTONIO', 'depto' => 'ADMINISTRACION']
+];
+
+$personalBloque3 = [
+    ['nombre' => 'SAHIANA MELINA BAZAN', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'MEDINA DE JESUS JOSE LUIS', 'depto' => 'ALMACEN'],
+    ['nombre' => 'CARLA JAQUELINE PRADO SANCHEZ', 'depto' => 'AUDITORIA'],
+    ['nombre' => 'ESQUIVEL MARTINEZ LILIAN', 'depto' => 'ELEVADORES'],
+    ['nombre' => 'GUTIERREZ ESQUIVEL EDGAR', 'depto' => 'GESTION'],
+    ['nombre' => 'INIESTRA SANCHEZ BRENDA', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'RAMIREZ AVILA VIRGINIA ABIGAIL', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'SANCHEZ ANTONIO ANA KERE', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'ROMERO LOPEZ LUIS ANTONIO', 'depto' => 'SISTEMAS'],
+    ['nombre' => 'LIZBETH YESENIA CRUZ PERALTA', 'depto' => 'TALENTO HUMANO'],
+    ['nombre' => 'CRUZ BLANCA HERNANDEZ FABIOLA', 'depto' => 'TALENTO HUMANO'],
+    ['nombre' => 'PEREZ MORENO JUAN', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'SAMUEL ESCALANTE GUADARRAMA', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'ACUÑA QUIROZ REBECA PAOLA', 'depto' => 'OBRA CIVIL'],
+    ['nombre' => 'RIOS GARCIA MELISSA', 'depto' => 'CONTABILIDAD'],
+    ['nombre' => 'JORGE VALENCIA GALVAN', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'SANCHEZ VELASCO CARLOS ARTURO', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'ABUNDIO VALDES FRANCISCO', 'depto' => 'CONTABILIDAD'],
+    ['nombre' => 'ROSALES RAMIREZ ALFREDO', 'depto' => 'SISTEMAS'],
+    ['nombre' => 'CASAS TREJO JOSE ANTONIO', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'MONROY SANCHEZ JOSE CARLOS', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'ALFREDO NAVARRO COLIN', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'GARCIA RIVERA LANDY YAMELY', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'DIMAS DIAZ SAUL ELIEL', 'depto' => 'OPERACIONES']
+];
+
+$personalBloque4 = [
+    ['nombre' => 'CASTILLO COLIN MARIA DEL CARMEN', 'depto' => 'ALTA DIRECCION'],
+    ['nombre' => 'DIONISIO ESPINOZA LUIS ALBERTO', 'depto' => 'LICITACIONES'],
+    ['nombre' => 'ESTRADA BECERRIL BERENICE', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'GONZALEZ AVILES REBECA', 'depto' => 'LICITACIONES'],
+    ['nombre' => 'JULIETA REBECA IGLESIAS MARTINEZ', 'depto' => 'AUDITORIA'],
+    ['nombre' => 'SOTO DEL HOYO ISMAEL', 'depto' => 'DIRECCION'],
+    ['nombre' => 'NAVA DE JESUS ROGELIO', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'NUÑEZ ROJAS DAVID URIEL', 'depto' => 'AUDITORIA'],
+    ['nombre' => 'CASTILLO NIETO JESSICA', 'depto' => 'DIRECCION'],
+    ['nombre' => 'BENITEZ REBOLLAR LIZBETH', 'depto' => 'ADMINISTRACION'],
+    ['nombre' => 'PINEDA JUAREZ ANA VIANEY', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'SAAVEDRA PEREZ MARTIN SANTOS', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'LIZBETH VILLEGAS SOSA', 'depto' => 'TALENTO HUMANO'],
+    ['nombre' => 'OROZCO CARMONA IVAN', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'ROBERTO ANTONIO BEST FERNANDEZ', 'depto' => 'OBRA CIVIL'],
+    ['nombre' => 'LUIS SALVADOR MEDINA VARGAS', 'depto' => 'TI'],
+    ['nombre' => 'JOSE FERNANDO OSORIO OJEDA', 'depto' => 'DIRECCION'],
+    ['nombre' => 'MANUEL EDUARDO SALCIDO HUERTA', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'CARBAJAL MENDEZ SILVIA LETICIA', 'depto' => 'FINANZAS Y CONTABILIDAD'],
+    ['nombre' => 'GERARDO ASTIVIA SANCHEZ', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'BRITO SAUCEDO FERNANDO ANTONIO', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'MARTINEZ APOLINAR ISRAEL', 'depto' => 'OPERACIONES'],
+    ['nombre' => 'PALACIOS LOPEZ JUAN MANUEL', 'depto' => 'DIRECCION']
+];
+
+// =============================================
+// PROCESAR PEDIDOS - SOLO HOY
+// =============================================
+
+// Obtener pedidos de la semana
+$pedidosSemana = getPedidosSemana();
+
+// Crear un mapa de pedidos por nombre - SOLO HOY
+$mapaPedidos = [];
+$hoy = date('Y-m-d'); // Fecha de HOY
+
+foreach ($pedidosSemana as $pedido) {
+    $nombreLimpio = trim(strtoupper($pedido['Nombre'] ?? $pedido['Usuario']));
+    $fecha = $pedido['FechaReal'] instanceof DateTime ? $pedido['FechaReal']->format('Y-m-d') : $pedido['FechaReal'];
+    $consumo = trim(strtoupper($pedido['Consumo']));
+    
+    // SOLO guardar pedidos de HOY
+    if ($fecha === $hoy) {
+        if (!isset($mapaPedidos[$nombreLimpio])) {
+            $mapaPedidos[$nombreLimpio] = [];
+        }
+        
+        $mapaPedidos[$nombreLimpio][] = [
+            'fecha' => $fecha,
+            'consumo' => $consumo
+        ];
+    }
 }
 
 // =============================================
 // MANEJO DE LOGIN Y SESIÓN
 // =============================================
 
-// Verificar login
 if (isset($_POST['login'])) {
     $usuario = $_POST['usuario'] ?? '';
     $contrasena = $_POST['contrasena'] ?? '';
@@ -123,31 +261,18 @@ if (isset($_POST['login'])) {
     }
 }
 
-// Cerrar sesión
 if (isset($_GET['logout'])) {
     session_destroy();
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }
 
-// Determinar página activa
 $pagina_actual = $_GET['page'] ?? 'comidas';
 
 // =============================================
 // FUNCIONES PARA EL MÓDULO DE COMIDAS
 // =============================================
 
-/**
- * @brief Recupera todas las comidas registradas para el día actual y las devuelve como JSON.
- *
- * Consulta la tabla Entradas filtrando por la fecha del día (GETDATE()). Para cada
- * registro limpia el campo Nombre aplicando una expresión CASE que extrae solo el
- * nombre del empleado a partir de cadenas compuestas (ej.: "NOMBRE: JUAN N.E: 10...").
- * Genera un Id_Unico por comida usando md5(nombre + fecha + hora_comida).
- * Termina la ejecución enviando la respuesta JSON directamente (exit).
- *
- * @return void Emite JSON con estructura: { success: bool, comidas: array }
- */
 function getComidas() {
     $conn = getConnection();
     
@@ -233,8 +358,6 @@ function getComidas() {
             $row['Estatus_Actual'] = !empty($row['Estatus']) ? $row['Estatus'] : 'PENDIENTE';
             $row['Nombre'] = $row['Nombre_Limpio'];
             $row['Nombre_Original'] = $row['Nombre_Original'];
-            
-            // Crear un ID único para esta comida
             $row['Id_Unico'] = md5($row['Nombre'] . $row['Hora_Entrada_SQL'] . $row['Fecha_Hora']);
             
             $comidas[] = $row;
@@ -249,15 +372,6 @@ function getComidas() {
     exit;
 }
 
-/**
- * @brief Obtiene el resumen estadístico de comidas del día actual y lo devuelve como JSON.
- *
- * Ejecuta un COUNT sobre la tabla Entradas para el día de hoy, calculando el total,
- * el número de comidas ATENDIDAS y el número de comidas PENDIENTES mediante SUM/CASE.
- * Termina la ejecución enviando la respuesta JSON directamente (exit).
- *
- * @return void Emite JSON con estructura: { success: bool, estadisticas: { total, atendidos, pendientes } }
- */
 function getEstadisticas() {
     $conn = getConnection();
     
@@ -287,17 +401,6 @@ function getEstadisticas() {
     exit;
 }
 
-/**
- * @brief Marca una comida específica del día como ATENDIDA en la tabla Entradas.
- *
- * Recibe via $_POST el nombre limpio del empleado, la fecha de entrada (Hora_Entrada)
- * y la hora de comida (Fecha). Realiza el UPDATE usando parámetros enlazados para
- * evitar inyección SQL. La identificación del registro se hace comparando el nombre
- * calculado dinámicamente con la misma lógica CASE del SELECT, la fecha de entrada
- * y la hora de la comida. Solo actualiza registros con Estatus NULL o 'PENDIENTE'.
- *
- * @return void Emite JSON con estructura: { success: bool, message: string, rows: int }
- */
 function marcarAtendido() {
     if (!isset($_POST['nombre']) || !isset($_POST['hora_entrada']) || !isset($_POST['fecha_hora'])) {
         http_response_code(400);
@@ -397,17 +500,6 @@ function marcarAtendido() {
 // FUNCIONES PARA EL MÓDULO DE COMPLEMENTOS
 // =============================================
 
-/**
- * @brief Recupera todos los complementos registrados para el día actual y los devuelve como JSON.
- *
- * Consulta la tabla complementos filtrando por la fecha del día (GETDATE()). Aplica la
- * misma lógica CASE de limpieza de nombres que getComidas(). Formatea fecha y hora,
- * calcula el estatus ('ATENDIDO' si atendido=1, 'PENDIENTE' en caso contrario) y
- * genera un Id_Unico md5(nombre + fecha + hora + tipo_complemento).
- * Termina la ejecución enviando la respuesta JSON directamente (exit).
- *
- * @return void Emite JSON con estructura: { success: bool, complementos: array }
- */
 function getComplementos() {
     $conn = getConnection();
     
@@ -462,7 +554,6 @@ function getComplementos() {
     $complementos = [];
     if ($stmt) {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            // Formatear fecha
             if (!empty($row['fecha'])) {
                 if ($row['fecha'] instanceof DateTime) {
                     $row['fecha_formateada'] = $row['fecha']->format('d/m/Y');
@@ -473,7 +564,6 @@ function getComplementos() {
                 }
             }
             
-            // Formatear hora
             if (!empty($row['hora'])) {
                 $hora = trim($row['hora']);
                 if (strlen($hora) == 5) {
@@ -486,15 +576,12 @@ function getComplementos() {
                 $row['hora_corta'] = '--:--';
             }
             
-            // Formatear fecha de atención si existe
             if (!empty($row['fecha_atendido']) && $row['fecha_atendido'] instanceof DateTime) {
                 $row['fecha_atendido_formateada'] = $row['fecha_atendido']->format('H:i:s');
             }
             
             $row['estatus'] = !empty($row['atendido']) && $row['atendido'] == 1 ? 'ATENDIDO' : 'PENDIENTE';
             $row['nombre'] = $row['Nombre_Limpio'];
-            
-            // Crear un ID único para este complemento
             $row['Id_Unico'] = md5($row['nombre'] . $row['fecha_sql'] . $row['hora_completa'] . $row['complemento']);
             
             $complementos[] = $row;
@@ -509,15 +596,6 @@ function getComplementos() {
     exit;
 }
 
-/**
- * @brief Obtiene el resumen estadístico de complementos del día actual y lo devuelve como JSON.
- *
- * Ejecuta un COUNT sobre la tabla complementos para el día de hoy, calculando total,
- * atendidos (atendido=1) y pendientes mediante SUM/CASE.
- * Termina la ejecución enviando la respuesta JSON directamente (exit).
- *
- * @return void Emite JSON con estructura: { success: bool, estadisticas: { total, atendidos, pendientes } }
- */
 function getEstadisticasComplementos() {
     $conn = getConnection();
     
@@ -547,17 +625,6 @@ function getEstadisticasComplementos() {
     exit;
 }
 
-/**
- * @brief Marca un complemento específico del día como atendido en la tabla complementos.
- *
- * Recibe via $_POST el nombre del empleado, el tipo de complemento, la fecha (dd/mm/yyyy)
- * y la hora (HH:MM o HH:MM:SS). Valida que todos los campos estén presentes y realiza
- * el UPDATE con parámetros enlazados. Identifica el registro comparando: fecha, los
- * primeros 5 caracteres de la hora, el tipo de complemento y el nombre calculado con
- * la misma lógica CASE. Solo actualiza registros con atendido NULL o 0.
- *
- * @return void Emite JSON con estructura: { success: bool, message: string }
- */
 function marcarComplementoAtendido() {
     if (!isset($_POST['nombre']) || !isset($_POST['complemento']) || !isset($_POST['fecha']) || !isset($_POST['hora'])) {
         http_response_code(400);
@@ -570,12 +637,11 @@ function marcarComplementoAtendido() {
     
     $nombre_limpio = trim($_POST['nombre']);
     $complemento = trim($_POST['complemento']);
-    $fecha = trim($_POST['fecha']);  // Formato: dd/mm/yyyy
-    $hora = trim($_POST['hora']);    // Formato: HH:MM
+    $fecha = trim($_POST['fecha']);
+    $hora = trim($_POST['hora']);
     
-    // Asegurar formato de hora completo
     if (strlen($hora) == 5) {
-        $hora .= ':00';  // Convierte "08:04" a "08:04:00"
+        $hora .= ':00';
     }
     
     $sql = "UPDATE complementos 
@@ -623,8 +689,6 @@ function marcarComplementoAtendido() {
             )
             AND (atendido IS NULL OR atendido = 0)";
     
-    // $fecha debe estar en formato dd/mm/yyyy (ej: "12/01/2026")
-    // $hora debe estar en formato HH:MM o HH:MM:SS
     $params = array($fecha, $hora, $complemento, $nombre_limpio);
     
     $stmt = sqlsrv_query($conn, $sql, $params);
@@ -662,15 +726,6 @@ function marcarComplementoAtendido() {
 // FUNCIONES PARA EL MÓDULO DE ASIGNACIÓN
 // =============================================
 
-/**
- * @brief Obtiene la lista completa de empleados del catálogo ConPed ordenada por nombre.
- *
- * Utilizada para poblar el selector de empleados en el módulo "Asignar Comidas".
- * A diferencia de las demás funciones del archivo, devuelve el array en lugar de
- * emitir JSON directamente — el llamador es quien serializa el resultado.
- *
- * @return array Arreglo asociativo con campos Id_Empleado, Nombre, Area
- */
 function getEmpleados() {
     $conn = getConnection();
     
@@ -689,15 +744,6 @@ function getEmpleados() {
     return $empleados;
 }
 
-/**
- * @brief Obtiene las cancelaciones aprobadas del día actual y las devuelve como JSON.
- *
- * Consulta la tabla Cancelaciones filtrando por ESTATUS='APROBADO' y fecha de hoy.
- * Formatea las fechas DateTime a strings legibles (dd/mm/YYYY y dd/mm/YYYY HH:MM).
- * Termina la ejecución enviando la respuesta JSON directamente (exit).
- *
- * @return void Emite JSON con estructura: { success: bool, cancelaciones: array }
- */
 function getCancelaciones() {
     $conn = getConnection();
     
@@ -717,7 +763,6 @@ function getCancelaciones() {
                 ESTATUS_SOLICITUD
             FROM Cancelaciones 
             WHERE CONVERT(DATE, FECHA) = CONVERT(DATE, GETDATE())
-            AND ESTATUS='APROBADO'
             ORDER BY FECHA DESC, NOMBRE ASC";
     
     $stmt = sqlsrv_query($conn, $sql);
@@ -749,17 +794,6 @@ function getCancelaciones() {
     exit;
 }
 
-/**
- * @brief Asigna una cancelación aprobada a un empleado específico.
- *
- * Requiere sesión activa. Actualiza los campos de asignación en la tabla Cancelaciones:
- * APARTADO_POR (Id_Empleado), USUARIO_APARTA (nombre), ESTATUS_APARTADO='ASIGNADO',
- * FECHA_APARTADO=GETDATE(), ESTATUS_SOLICITUD='APROBADA' y APARTADO_APROBADO_POR
- * (nombre del chef en sesión). La identificación del registro se hace por NOMBRE,
- * TIPO_CONSUMO y FECHA (con parámetros enlazados).
- *
- * @return void Emite JSON con estructura: { success: bool, message: string }
- */
 function asignarCancelacion() {
     if (!isset($_SESSION['usuario']) || !$_SESSION['usuario']['logueado']) {
         echo json_encode(['success' => false, 'message' => 'No autorizado']);
@@ -821,16 +855,6 @@ function asignarCancelacion() {
     exit;
 }
 
-/**
- * @brief Libera una cancelación previamente asignada, dejando todos sus campos de asignación en NULL.
- *
- * Requiere sesión activa. Pone en NULL los campos: APARTADO_POR, USUARIO_APARTA,
- * ESTATUS_APARTADO, FECHA_APARTADO, ESTATUS_SOLICITUD, MOTIVO_SOLICITUD, FECHA_SOLICITUD,
- * MOTIVO_RECHAZO, RECHAZADO_POR, FECHA_RECHAZO y APARTADO_APROBADO_POR.
- * La cancelación queda disponible nuevamente para ser asignada.
- *
- * @return void Emite JSON con estructura: { success: bool, message: string }
- */
 function liberarCancelacion() {
     if (!isset($_SESSION['usuario']) || !$_SESSION['usuario']['logueado']) {
         echo json_encode(['success' => false, 'message' => 'No autorizado']);
@@ -891,18 +915,6 @@ function liberarCancelacion() {
 // FUNCIONES PARA EL MÓDULO DE REGISTROS DE COMIDA
 // =============================================
 
-/**
- * @brief Mapa de nombres cortos a cadenas completas de empleado para el módulo de Registros.
- *
- * Asocia el nombre corto legible (clave) con la cadena de metadata completa del empleado
- * (valor) tal como se almacena en la columna Nombre de la tabla entradas. Se usa en
- * crearRegistroComida() para traducir la selección del Chef al formato esperado por la BD.
- *
- * @note Esta lista es estática y debe mantenerse sincronizada manualmente con el catálogo
- *       de empleados. Pendiente de refactorizar para leerla dinámicamente desde la BD.
- *
- * @var array<string, string>
- */
 $nombresCompletos = [
     "ALEJANDRA CRUZ" => "NOMBRE: ALEJANDRA CRUZ N.E: 3 DEPARTAMENTO: DIRECCION AREA: DIRECCION ZONA: ZINACANTEPEC PUESTO: ANALISTA NSS: 0000000000 CEL: 24",
     "ALTA DIRECCION" => "NOMBRE: ALTA DIRECCION N.E: 4 DEPARTAMENTO: DIRECCION AREA: DIRECCION ZONA: ZINACANTEPEC PUESTO: DIRECCION NSS: 0000000000 CEL: 26",
@@ -911,22 +923,10 @@ $nombresCompletos = [
     "JURIDICO" => "NOMBRE: JURIDICO N.E: 5 DEPARTAMENTO: PROYECTOS ESPECIALES AREA: JURIDICO ZONA: ZINACANTEPEC PUESTO: ABOGADOS NSS: 0000000000",
     "PALMA TREJO SANDY MARK" => "NOMBRE: PALMA TREJO SANDY MARK N.E: 1101 DEPARTAMENTO: DIRECCION AREA: DIRECCION ZONA: ZINACANTEPEC PUESTO: CHOFER NSS: 81927423350",
     "REYES QUIROZ HILDA" => "NOMBRE: REYES QUIROZ HILDA N.E: 24 DEPARTAMENTO: CONTABILIDAD Y FINANZAS AREA: CONTROL DE EGRESOS ZONA: TOLUCA VIA REMOTA PUESTO: ANALISTA NSS: 18886904574",
-    "VIGILANCIA" => "NOMBRE: VIGILANCIA N.E: 105868 DEPARTAMENTO: SERVICIOS GENERALES AREA: VIGILANCIA ZONA: ZINACANTEPEC PUESTO: VIGILANTE NSS: 000000000000"
+    "VIGILANCIA" => "NOMBRE: VIGILANCIA N.E: 105868 DEPARTAMENTO: SERVICIOS GENERALES AREA: VIGILANCIA ZONA: ZINACANTEPEC PUESTO: VIGILANTE NSS: 000000000000",
+    "COCINA" => "NOMBRE: COCINA N.E: 105869 DEPARTAMENTO: SERVICIOS GENERALES AREA: VIGILANCIA ZONA: ZINACANTEPEC PUESTO: VIGILANTE NSS: 000000000000"
 ];
 
-/**
- * @brief Inserta manualmente un registro de comida en la tabla entradas.
- *
- * Permite al Chef registrar una comida que no fue ingresada por el canal normal.
- * Recibe via $_POST el nombre corto del empleado (key del array $nombresCompletos),
- * una fecha en formato dd-mm-yyyy y una hora en formato HH:MM:SS.
- * Ambos formatos se validan con expresiones regulares antes del INSERT.
- * Si el nombre corto existe en $nombresCompletos, se almacena el nombre completo
- * (con toda la metadata del empleado); de lo contrario se almacena el nombre tal cual.
- * El registro se crea con Estatus='PENDIENTE'.
- *
- * @return void Emite JSON con estructura: { success: bool, message: string }
- */
 function crearRegistroComida() {
     global $nombresCompletos;
     
@@ -941,13 +941,11 @@ function crearRegistroComida() {
     $hora_real = trim($_POST['hora_real']);
     $fecha_real = trim($_POST['fecha_real']);
     
-    // Validar formato de fecha (dd-mm-yyyy)
     if (!preg_match('/^\d{2}-\d{2}-\d{4}$/', $fecha_real)) {
         echo json_encode(['success' => false, 'message' => 'Formato de fecha incorrecto. Use dd-mm-yyyy']);
         exit;
     }
     
-    // Validar formato de hora (HH:MM:SS)
     if (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $hora_real)) {
         echo json_encode(['success' => false, 'message' => 'Formato de hora incorrecto. Use HH:MM:SS']);
         exit;
@@ -963,8 +961,8 @@ function crearRegistroComida() {
         0,
         $nombre_completo,
         '',
-        $hora_real,     // TEXTO
-        $fecha_real,    // TEXTO
+        $hora_real,
+        $fecha_real,
         'PENDIENTE'
     ];
     
@@ -981,16 +979,6 @@ function crearRegistroComida() {
     exit;
 }
 
-/**
- * @brief Recupera todos los registros de comida del día actual desde la tabla entradas.
- *
- * Filtra por Hora_Entrada igual a la fecha de hoy en formato dd-mm-YYYY.
- * Limpia el campo Nombre usando preg_replace para extraer solo el nombre del empleado
- * de cadenas compuestas que contengan "NOMBRE:". Formatea Fecha_Atendido como HH:MM:SS.
- * Termina la ejecución enviando la respuesta JSON directamente (exit).
- *
- * @return void Emite JSON con estructura: { success: bool, registros: array, hoy: string }
- */
 function getRegistrosHoy() {
     $conn = getConnection();
     
@@ -1012,7 +1000,6 @@ function getRegistrosHoy() {
     $registros = [];
     if ($stmt) {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            // Limpiar nombre
             $nombreLimpio = $row['Nombre'];
             if (strpos($nombreLimpio, 'NOMBRE:') !== false) {
                 $nombreLimpio = preg_replace('/NOMBRE:\s*(.+?)\s+(N\.E:|DEPARTAMENTO:|NSS:|se encuentra registrado para|AREA:)/', '$1', $nombreLimpio);
@@ -1020,7 +1007,6 @@ function getRegistrosHoy() {
             }
             $row['Nombre_Limpio'] = $nombreLimpio;
             
-            // Formatear fecha de atención si existe
             if (!empty($row['Fecha_Atendido']) && $row['Fecha_Atendido'] instanceof DateTime) {
                 $row['Fecha_Atendido_Formateada'] = $row['Fecha_Atendido']->format('H:i:s');
             }
@@ -1035,6 +1021,64 @@ function getRegistrosHoy() {
     header('Content-Type: application/json');
     echo json_encode(['success' => true, 'registros' => $registros, 'hoy' => $hoy]);
     exit;
+}
+
+// =============================================
+// FUNCIÓN PARA OBTENER BLOQUE ACTUAL (AJAX)
+// =============================================
+
+function getBloqueActualJSON() {
+    global $horariosComedor;
+    $bloqueActual = getBloqueActual($horariosComedor);
+    
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true, 'bloque' => $bloqueActual]);
+    exit;
+}
+
+// Función para obtener el bloque actual
+function getBloqueActual($horariosComedor) {
+    $horaActual = date('H:i');
+    $tipoComida = date('H') < 12 ? 'desayuno' : 'comida';
+    
+    foreach ($horariosComedor[$tipoComida] as $bloque => $horario) {
+        if ($horaActual >= $horario['inicio'] && $horaActual <= $horario['fin']) {
+            return [
+                'bloque' => $bloque,
+                'tipo' => $tipoComida,
+                'nombre' => $horario['nombre'],
+                'inicio' => $horario['inicio'],
+                'fin' => $horario['fin'],
+                'activo' => true
+            ];
+        }
+    }
+    
+    $siguienteBloque = null;
+    foreach ($horariosComedor[$tipoComida] as $bloque => $horario) {
+        if ($horaActual < $horario['inicio']) {
+            $siguienteBloque = [
+                'bloque' => $bloque,
+                'tipo' => $tipoComida,
+                'nombre' => $horario['nombre'],
+                'inicio' => $horario['inicio'],
+                'fin' => $horario['fin'],
+                'activo' => false,
+                'mensaje' => 'Próximo: ' . $horario['nombre']
+            ];
+            break;
+        }
+    }
+    
+    if ($siguienteBloque) {
+        return $siguienteBloque;
+    }
+    
+    return [
+        'activo' => false,
+        'mensaje' => '⏰ No hay turno de comida en este momento',
+        'tipo' => $tipoComida
+    ];
 }
 
 // =============================================
@@ -1076,23 +1120,33 @@ if (isset($_GET['action'])) {
         case 'get_registros_hoy':
             getRegistrosHoy();
             break;
+        case 'get_bloque_actual':
+            getBloqueActualJSON();
+            break;
     }
 }
 
 // =============================================
-// HTML Y DISEÑO
+// OBTENER DATOS PARA RENDERIZADO INICIAL
 // =============================================
+
+$bloqueActual = getBloqueActual($horariosComedor);
+$empleados = getEmpleados();
+$turnoActual = date('H') < 12 ? 'DESAYUNO' : 'COMIDA';
+$colorTurno = date('H') < 12 ? '#FFC107' : '#2196F3';
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Chef Premium</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes">
+    <title>Dashboard Chef Premium - Versión Actualizada</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <style>
+        /* ============ VARIABLES Y RESET MEJORADOS ============ */
         :root {
             --primary: #2c5aa0;
             --primary-light: #4a7bc8;
@@ -1102,51 +1156,69 @@ if (isset($_GET['action'])) {
             --secondary-dark: #FF8F00;
             --accent: #6c757d;
             --success: #28a745;
+            --success-light: #d4edda;
             --warning: #ffc107;
+            --warning-light: #fff3cd;
             --danger: #dc3545;
+            --danger-light: #f8d7da;
+            --info: #17a2b8;
             --light: #f8f9fa;
             --dark: #343a40;
-            --glass-bg: rgba(255, 255, 255, 0.95);
+            --glass-bg: rgba(255, 255, 255, 0.98);
             --glass-border: rgba(255, 255, 255, 0.2);
-            --shadow-light: 0 8px 32px rgba(31, 38, 135, 0.1);
-            --shadow-medium: 0 15px 50px rgba(44, 90, 160, 0.15);
-            --shadow-dark: 0 20px 60px rgba(0, 0, 0, 0.1);
+            --shadow-sm: 0 2px 8px rgba(0,0,0,0.05);
+            --shadow-md: 0 5px 20px rgba(44, 90, 160, 0.12);
+            --shadow-lg: 0 15px 40px rgba(44, 90, 160, 0.2);
+            --shadow-hover: 0 20px 50px rgba(44, 90, 160, 0.25);
             --complement-color: #2196F3;
-            --complement-light: #64B5F6;
-            --complement-dark: #1976D2;
+            --complement-light: #e3f2fd;
+            --desayuno-color: #FFC107;
+            --comida-color: #2196F3;
+            --bloque1-color: #4CAF50;
+            --bloque2-color: #FF9800;
+            --bloque3-color: #9C27B0;
+            --bloque4-color: #F44336;
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            --border-radius: 16px;
+            --border-radius-sm: 12px;
+            --border-radius-lg: 24px;
         }
         
         * {
             font-family: 'Inter', sans-serif;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
         
         body {
-            background: linear-gradient(135deg, #f5f7fa 0%, #e3f2fd 100%);
+            background: linear-gradient(145deg, #f0f5ff 0%, #e6f0fa 100%);
             min-height: 100vh;
             overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
         
-        /* Login Page */
+        /* ============ LOGIN MEJORADO ============ */
         .login-container {
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            padding: 20px;
+            padding: 16px;
         }
         
         .login-card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-radius: 25px;
-            border: 1px solid var(--glass-border);
-            box-shadow: var(--shadow-dark);
-            padding: 50px;
+            background: white;
+            border-radius: 32px;
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+            padding: clamp(30px, 6vw, 50px);
             width: 100%;
-            max-width: 450px;
-            animation: fadeIn 0.8s ease;
+            max-width: 480px;
+            animation: slideUpFade 0.6s ease;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
         }
         
         .login-header {
@@ -1155,88 +1227,136 @@ if (isset($_GET['action'])) {
         }
         
         .login-icon {
-            width: 80px;
-            height: 80px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            width: 90px;
+            height: 90px;
+            background: linear-gradient(145deg, var(--primary), var(--primary-dark));
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             margin: 0 auto 25px;
             color: white;
-            font-size: 32px;
-            box-shadow: 0 10px 30px rgba(44, 90, 160, 0.4);
+            font-size: 38px;
+            box-shadow: 0 15px 30px rgba(44, 90, 160, 0.4);
+            border: 3px solid var(--secondary);
         }
         
-        /* Navbar */
+        /* ============ NAVBAR PREMIUM ============ */
         .navbar-premium {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            background: linear-gradient(145deg, var(--primary), var(--primary-dark));
             backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
             border-bottom: 3px solid var(--secondary);
-            box-shadow: var(--shadow-medium);
-            padding: 15px 0;
+            box-shadow: var(--shadow-lg);
+            padding: 12px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1030;
         }
         
         .navbar-brand-premium {
             font-weight: 700;
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             color: white !important;
             text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: -0.5px;
         }
         
         .navbar-brand-premium i {
             color: var(--secondary);
-            margin-right: 10px;
+            font-size: 1.8rem;
         }
         
-        /* Sidebar */
+        .user-dropdown {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 40px;
+            padding: 6px 16px 6px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: var(--transition);
+            cursor: pointer;
+        }
+        
+        .user-dropdown:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* ============ SIDEBAR MEJORADO ============ */
         .sidebar-container {
             position: fixed;
-            top: 80px;
+            top: 76px;
             left: 0;
-            height: calc(100vh - 80px);
-            width: 260px;
-            background: var(--glass-bg);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
-            border-right: 1px solid var(--glass-border);
-            box-shadow: var(--shadow-light);
-            z-index: 100;
-            transition: transform 0.3s ease;
+            height: calc(100vh - 76px);
+            width: 280px;
+            background: white;
+            border-right: 1px solid rgba(44, 90, 160, 0.1);
+            box-shadow: 5px 0 30px rgba(0, 0, 0, 0.03);
+            z-index: 1020;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+        
+        .sidebar-container::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .sidebar-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .sidebar-container::-webkit-scrollbar-thumb {
+            background: var(--primary-light);
+            border-radius: 4px;
         }
         
         .sidebar-header {
-            padding: 25px 20px;
-            border-bottom: 1px solid rgba(0,0,0,0.05);
+            padding: 24px 20px;
+            border-bottom: 2px solid rgba(44, 90, 160, 0.1);
+            background: linear-gradient(to right, rgba(44, 90, 160, 0.02), transparent);
+        }
+        
+        .user-avatar {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(145deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 15px;
+            color: white;
+            font-size: 40px;
+            border: 3px solid var(--secondary);
+            box-shadow: 0 10px 25px rgba(44, 90, 160, 0.3);
         }
         
         .user-info h5 {
             color: var(--primary-dark);
-            font-weight: 600;
+            font-weight: 700;
             margin-bottom: 5px;
-        }
-        
-        .sidebar-menu {
-            padding: 20px 0;
         }
         
         .menu-item {
             display: flex;
             align-items: center;
-            padding: 15px 25px;
+            padding: 14px 24px;
             color: var(--primary);
             text-decoration: none;
-            transition: all 0.3s ease;
+            transition: var(--transition);
             border-left: 4px solid transparent;
-            margin-bottom: 5px;
+            margin: 4px 8px;
+            border-radius: 12px;
+            font-weight: 500;
+            gap: 16px;
         }
         
         .menu-item:hover {
-            background: rgba(44, 90, 160, 0.08);
+            background: rgba(44, 90, 160, 0.06);
             color: var(--primary-dark);
             border-left-color: var(--secondary);
-            padding-left: 30px;
+            transform: translateX(5px);
         }
         
         .menu-item.active {
@@ -1244,86 +1364,144 @@ if (isset($_GET['action'])) {
             color: var(--primary-dark);
             border-left-color: var(--secondary);
             font-weight: 600;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
         }
         
         .menu-item i {
             width: 24px;
-            margin-right: 15px;
-            font-size: 1.1rem;
+            font-size: 1.2rem;
+            text-align: center;
         }
         
-        /* Main Content */
+        /* ============ MAIN CONTENT ============ */
         .main-content {
-            margin-left: 260px;
+            margin-left: 280px;
             padding: 30px;
             transition: margin-left 0.3s ease;
+            min-height: calc(100vh - 76px);
+        }
+        
+        /* ============ RESPONSIVE BREAKPOINTS MEJORADOS ============ */
+        @media (max-width: 1200px) {
+            .main-content {
+                padding: 20px;
+            }
         }
         
         @media (max-width: 992px) {
             .sidebar-container {
                 transform: translateX(-100%);
+                box-shadow: 10px 0 40px rgba(0,0,0,0.1);
             }
-            
             .main-content {
                 margin-left: 0;
+                padding: 20px;
             }
-            
             .sidebar-container.show {
                 transform: translateX(0);
             }
         }
         
-        /* Dashboard Cards */
+        @media (max-width: 768px) {
+            .navbar-brand-premium span {
+                display: none;
+            }
+            .main-content {
+                padding: 16px;
+            }
+        }
+        
+        /* ============ TOGGLE BUTTON ============ */
+        .toggle-sidebar {
+            display: none;
+            background: var(--secondary);
+            border: none;
+            border-radius: 14px;
+            width: 44px;
+            height: 44px;
+            align-items: center;
+            justify-content: center;
+            color: var(--dark);
+            font-size: 1.3rem;
+            box-shadow: 0 6px 18px rgba(255, 193, 7, 0.3);
+            transition: var(--transition);
+            margin-right: 12px;
+        }
+        
+        .toggle-sidebar:hover {
+            transform: scale(1.05);
+            background: var(--secondary-dark);
+            color: white;
+        }
+        
+        @media (max-width: 992px) {
+            .toggle-sidebar {
+                display: flex;
+            }
+        }
+        
+        /* ============ CARDS MEJORADAS ============ */
         .dashboard-card {
-            background: var(--glass-bg);
+            background: white;
+            border-radius: var(--border-radius-lg);
+            box-shadow: var(--shadow-md);
+            padding: 28px;
+            margin-bottom: 30px;
+            transition: var(--transition);
+            border: 1px solid rgba(44, 90, 160, 0.08);
             backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-radius: 20px;
-            border: 1px solid var(--glass-border);
-            box-shadow: var(--shadow-light);
-            padding: 25px;
-            margin-bottom: 25px;
-            transition: all 0.3s ease;
         }
         
         .dashboard-card:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--shadow-dark);
+            box-shadow: var(--shadow-hover);
+            border-color: rgba(44, 90, 160, 0.15);
         }
         
         .card-header-premium {
-            background: transparent;
-            border-bottom: 2px solid rgba(44, 90, 160, 0.1);
-            padding-bottom: 15px;
-            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 2px solid rgba(44, 90, 160, 0.08);
+            padding-bottom: 20px;
+            margin-bottom: 24px;
+            gap: 15px;
         }
         
         .card-title-premium {
             color: var(--primary-dark);
             font-weight: 700;
-            font-size: 1.4rem;
+            font-size: 1.5rem;
             margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
         }
         
         .card-title-premium i {
             color: var(--secondary);
-            margin-right: 10px;
+            font-size: 1.8rem;
         }
         
-        /* Stats Cards */
+        /* ============ STAT CARDS MEJORADAS ============ */
         .stat-card {
             background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: var(--shadow-light);
+            border-radius: var(--border-radius);
+            padding: 20px;
+            box-shadow: var(--shadow-sm);
             border-top: 5px solid var(--primary);
-            transition: all 0.3s ease;
+            transition: var(--transition);
             height: 100%;
+            border: 1px solid rgba(44, 90, 160, 0.08);
+            display: flex;
+            flex-direction: column;
         }
         
         .stat-card:hover {
             transform: translateY(-5px);
-            box-shadow: var(--shadow-medium);
+            box-shadow: var(--shadow-md);
+            border-color: var(--primary-light);
         }
         
         .stat-card.warning {
@@ -1341,195 +1519,378 @@ if (isset($_GET['action'])) {
         .stat-icon {
             width: 60px;
             height: 60px;
-            border-radius: 15px;
+            border-radius: 18px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
-            margin-bottom: 20px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            font-size: 26px;
+            margin-bottom: 18px;
+            background: linear-gradient(145deg, var(--primary), var(--primary-dark));
             color: white;
-            box-shadow: 0 5px 15px rgba(44, 90, 160, 0.3);
+            box-shadow: 0 8px 18px rgba(44, 90, 160, 0.25);
         }
         
         .stat-icon.warning {
-            background: linear-gradient(135deg, var(--warning) 0%, var(--secondary) 100%);
+            background: linear-gradient(145deg, var(--warning), var(--secondary-dark));
         }
         
         .stat-icon.success {
-            background: linear-gradient(135deg, var(--success) 0%, #1e7e34 100%);
+            background: linear-gradient(145deg, var(--success), #1e7e34);
         }
         
         .stat-icon.complement {
-            background: linear-gradient(135deg, var(--complement-color) 0%, var(--complement-light) 100%);
+            background: linear-gradient(145deg, var(--complement-color), #1976D2);
         }
         
-        /* Buttons */
-        .btn-premium {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+        /* ============ BUTTONS MEJORADOS ============ */
+        .btn-premium, .btn-complement {
             border: none;
-            border-radius: 12px;
-            padding: 12px 25px;
-            color: white;
+            border-radius: 14px;
+            padding: 12px 24px;
             font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 5px 15px rgba(44, 90, 160, 0.3);
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(44, 90, 160, 0.2);
+            letter-spacing: 0.3px;
+        }
+        
+        .btn-premium {
+            background: linear-gradient(145deg, var(--primary), var(--primary-dark));
+            color: white;
         }
         
         .btn-premium:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(44, 90, 160, 0.4);
+            box-shadow: 0 8px 20px rgba(44, 90, 160, 0.35);
             color: white;
+            background: linear-gradient(145deg, var(--primary-dark), var(--primary));
         }
         
         .btn-complement {
-            background: linear-gradient(135deg, var(--complement-color) 0%, var(--complement-dark) 100%);
-            border: none;
-            border-radius: 12px;
-            padding: 12px 25px;
+            background: linear-gradient(145deg, var(--complement-color), #1976D2);
             color: white;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 5px 15px rgba(33, 150, 243, 0.3);
         }
         
         .btn-complement:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(33, 150, 243, 0.4);
-            color: white;
+            box-shadow: 0 8px 20px rgba(33, 150, 243, 0.35);
+            background: linear-gradient(145deg, #1976D2, var(--complement-color));
         }
         
-        /* Comidas Cards */
-        .comida-card {
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 0.85rem;
+        }
+        
+        /* ============ LIST CARDS MEJORADAS ============ */
+        .comida-card, .complemento-card, .registro-card, .cancelacion-card {
             background: white;
-            border-radius: 15px;
+            border-radius: 18px;
             padding: 20px;
-            margin-bottom: 15px;
-            box-shadow: 0 5px 15px rgba(44, 90, 160, 0.08);
-            border-left: 5px solid var(--warning);
-            transition: all 0.3s ease;
-            border: 1px solid #e9ecef;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 12px rgba(44, 90, 160, 0.05);
+            border-left: 6px solid var(--warning);
+            transition: var(--transition);
+            border: 1px solid #edf2f7;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
         
-        .comida-card:hover {
-            box-shadow: 0 8px 25px rgba(44, 90, 160, 0.15);
-            transform: translateY(-3px);
+        .comida-card:hover, .complemento-card:hover, .registro-card:hover, .cancelacion-card:hover {
+            box-shadow: 0 10px 30px rgba(44, 90, 160, 0.12);
+            transform: translateY(-4px);
             border-color: var(--warning);
         }
         
-        .comida-card.atendida {
+        .comida-card.atendida, .complemento-card.atendida, .registro-card.atendida {
             border-left-color: var(--success);
-            background: linear-gradient(to right, rgba(40, 167, 69, 0.05), white);
+            background: linear-gradient(145deg, white, #f8fff9);
         }
         
-        /* Complementos Cards */
-        .complemento-card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 15px;
-            box-shadow: 0 5px 15px rgba(33, 150, 243, 0.08);
-            border-left: 5px solid var(--complement-color);
-            transition: all 0.3s ease;
-            border: 1px solid #e9ecef;
-        }
-        
-        .complemento-card:hover {
-            box-shadow: 0 8px 25px rgba(33, 150, 243, 0.15);
-            transform: translateY(-3px);
-            border-color: var(--complement-color);
-        }
-        
-        .complemento-card.atendida {
+        .cancelacion-card.asignada {
             border-left-color: var(--success);
-            background: linear-gradient(to right, rgba(40, 167, 69, 0.05), white);
         }
         
-        /* Registros Cards */
-        .registro-card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 15px;
-            box-shadow: 0 5px 15px rgba(44, 90, 160, 0.08);
-            border-left: 5px solid var(--primary);
-            transition: all 0.3s ease;
-            border: 1px solid #e9ecef;
+        /* ============ GRID PERSONAL MEJORADO ============ */
+        .personal-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+            max-height: 600px;
+            overflow-y: auto;
+            padding: 4px 4px 8px 0;
+            scrollbar-width: thin;
         }
         
-        .registro-card:hover {
-            box-shadow: 0 8px 25px rgba(44, 90, 160, 0.15);
-            transform: translateY(-3px);
-            border-color: var(--primary);
-        }
-        
-        .registro-badge {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-            color: white;
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 0.8rem;
-            display: inline-block;
-        }
-        
-        .complemento-badge {
-            background: linear-gradient(135deg, var(--complement-color) 0%, var(--complement-light) 100%);
-            color: white;
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 0.8rem;
-            display: inline-block;
-        }
-        
-        /* Toggle Sidebar Button */
-        .toggle-sidebar {
-            display: none;
-            background: var(--secondary);
-            border: none;
-            border-radius: 10px;
-            width: 40px;
-            height: 40px;
-            align-items: center;
-            justify-content: center;
-            color: var(--dark);
-            font-size: 1.2rem;
-            box-shadow: 0 4px 15px rgba(255, 193, 7, 0.3);
-            transition: all 0.3s ease;
-        }
-        
-        .toggle-sidebar:hover {
-            transform: scale(1.1);
-        }
-        
-        @media (max-width: 992px) {
-            .toggle-sidebar {
-                display: flex;
+        @media (max-width: 640px) {
+            .personal-grid {
+                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             }
         }
         
-        /* Badges */
-        .badge-premium {
-            padding: 8px 15px;
+        .personal-item {
+            background: white;
+            border: 1px solid #edf2f7;
+            border-radius: 16px;
+            padding: 16px 10px;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.02);
+            min-height: 160px;
+        }
+        
+        .personal-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(44,90,160,0.12);
+            border-color: var(--primary-light);
+        }
+        
+        .personal-numero {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 0.75rem;
+            margin-bottom: 8px;
+            background: rgba(44,90,160,0.08);
+            padding: 4px 12px;
+            border-radius: 40px;
+            width: fit-content;
+        }
+        
+        .personal-nombre {
+            font-weight: 700;
+            margin-bottom: 6px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            color: var(--primary-dark);
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            width: 100%;
+        }
+        
+        .personal-depto {
+            font-size: 0.7rem;
+            background: rgba(44,90,160,0.06);
+            color: var(--primary);
+            padding: 4px 12px;
+            border-radius: 40px;
+            margin: 8px 0;
+            font-weight: 500;
+            max-width: 100%;
+        }
+        
+        /* ============ BADGES MEJORADOS - CORREGIDOS PARA MOSTRAR AGENDADO ============ */
+        .badge-atendido, .badge-pendiente, .badge-sinregistro, .badge-consumo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            width: 100%;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 40px;
+            font-size: 0.7rem;
+            white-space: nowrap;
+        }
+        
+        .badge-atendido {
+            background: var(--success-light);
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .badge-pendiente {
+            background: var(--warning-light);
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        
+        .badge-sinregistro {
+            background: #e9ecef;
+            color: #495057;
+            border: 1px solid #ced4da;
+        }
+        
+        .badge-consumo {
+            background: rgba(255, 193, 7, 0.15);
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        
+        /* Estilo específico para COMIDA AGENDADO */
+        .badge-consumo-comida {
+            background: rgba(33, 150, 243, 0.15);
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        /* ============ ESTADOS LEYENDA ============ */
+        .estados-leyenda {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            background: white;
+            padding: 16px 20px;
+            border-radius: 14px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 20px;
+            border: 1px solid #edf2f7;
+        }
+        
+        /* ============ SPLIT LAYOUT ============ */
+        .split-layout {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 25px;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 1200px) {
+            .split-layout {
+                grid-template-columns: 1fr;
+                gap: 30px;
+            }
+        }
+        
+        .comidas-section, .horarios-section {
+            min-width: 0;
+        }
+        
+        .comidas-section {
+            max-height: 800px;
+            overflow-y: auto;
+            padding-right: 8px;
+            scrollbar-width: thin;
+        }
+        
+        /* ============ HORARIOS BANNER ============ */
+        .horarios-banner {
+            background: linear-gradient(145deg, var(--primary), var(--primary-dark));
             border-radius: 20px;
+            padding: 24px;
+            margin-bottom: 24px;
+            color: white;
+            box-shadow: var(--shadow-md);
+        }
+        
+        .digital-clock {
+            font-family: 'Courier New', monospace;
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: 3px;
+            background: rgba(0,0,0,0.2);
+            padding: 8px 20px;
+            border-radius: 16px;
+            display: inline-block;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .bloque-activo {
+            background: rgba(255,193,7,0.2);
+            border: 2px solid var(--secondary);
+            border-radius: 16px;
+            padding: 20px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255,193,7,0.5); }
+            70% { box-shadow: 0 0 0 12px rgba(255,193,7,0); }
+            100% { box-shadow: 0 0 0 0 rgba(255,193,7,0); }
+        }
+        
+        /* ============ TABS BLOQUES ============ */
+        .bloque-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .bloque-tab {
+            flex: 1;
+            min-width: 100px;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 14px;
+            padding: 12px 8px;
+            color: var(--dark);
             font-weight: 600;
             font-size: 0.8rem;
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
         }
         
-        .badge-primary-premium {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+        .bloque-tab:hover {
+            background: var(--primary);
             color: white;
+            border-color: var(--primary);
         }
         
-        /* Loading Spinner */
+        .bloque-tab.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+            box-shadow: 0 5px 15px rgba(44,90,160,0.3);
+        }
+        
+        /* ============ FORMULARIO REGISTRO ============ */
+        .form-registro {
+            background: white;
+            border-radius: 20px;
+            padding: 28px;
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 30px;
+            border: 1px solid #edf2f7;
+        }
+        
+        .datetime-input {
+            position: relative;
+        }
+        
+        .datetime-input input {
+            padding-right: 45px;
+            border-radius: 14px;
+            border: 1px solid #dee2e6;
+            height: 48px;
+        }
+        
+        .datetime-input i {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--primary);
+            pointer-events: none;
+            font-size: 1.1rem;
+        }
+        
+        /* ============ LOADING SPINNER ============ */
         .loading-spinner {
             width: 50px;
             height: 50px;
-            border: 5px solid rgba(44, 90, 160, 0.1);
-            border-top: 5px solid var(--primary);
+            border: 4px solid rgba(44, 90, 160, 0.1);
+            border-top: 4px solid var(--primary);
             border-radius: 50%;
-            animation: spin 1s linear infinite;
+            animation: spin 0.8s linear infinite;
         }
         
         @keyframes spin {
@@ -1537,50 +1898,29 @@ if (isset($_GET['action'])) {
             100% { transform: rotate(360deg); }
         }
         
-        /* Animations */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
+        /* ============ ANIMACIONES ============ */
+        @keyframes slideUpFade {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         
         .fade-in {
-            animation: fadeIn 0.5s ease;
+            animation: slideUpFade 0.5s ease;
         }
         
-        /* Cancelaciones Cards */
-        .cancelacion-card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: var(--shadow-light);
-            border-left: 5px solid var(--primary);
-            transition: all 0.3s ease;
-        }
-        
-        .cancelacion-card:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--shadow-medium);
-        }
-        
-        .cancelacion-card.asignada {
-            border-left-color: var(--success);
-        }
-        
-        /* Area Badge */
-        .area-badge {
-            background: rgba(44, 90, 160, 0.1);
-            color: var(--primary);
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-        
-        /* Empty State */
+        /* ============ EMPTY STATE ============ */
         .empty-state {
             text-align: center;
             padding: 60px 20px;
+            background: white;
+            border-radius: 20px;
+            border: 2px dashed #dee2e6;
         }
         
         .empty-state i {
@@ -1589,136 +1929,105 @@ if (isset($_GET['action'])) {
             margin-bottom: 20px;
         }
         
-        /* Info Row */
-        .info-row {
-            margin-bottom: 5px;
-            font-size: 0.9rem;
-        }
-        
-        .info-label {
+        /* ============ TURNO INDICATOR ============ */
+        .turno-indicator {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 18px;
+            border-radius: 40px;
+            font-size: 0.85rem;
             font-weight: 600;
-            color: #495057;
+            gap: 8px;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(5px);
         }
         
-        /* Complemento Icon */
-        .complemento-icon {
-            color: var(--complement-color);
+        .turno-desayuno {
+            background: var(--desayuno-color);
+            color: black;
         }
         
-        /* Botones de filtro estilo AZUL para complementos */
-        .btn-outline-complement {
-            color: var(--complement-color);
-            border-color: var(--complement-color);
-        }
-        
-        .btn-outline-complement:hover {
-            background-color: var(--complement-color);
-            border-color: var(--complement-color);
+        .turno-comida {
+            background: var(--comida-color);
             color: white;
         }
         
-        .btn-outline-complement.active {
-            background-color: var(--complement-color);
-            border-color: var(--complement-color);
+        /* ============ FLOATING BUTTON ============ */
+        .floating-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, var(--primary), var(--primary-dark));
             color: white;
+            border: none;
+            box-shadow: 0 10px 30px rgba(44, 90, 160, 0.4);
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: var(--transition);
+            z-index: 1050;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
-        /* Botones de filtro estilo AZUL para registros */
-        .btn-outline-primary {
-            color: var(--primary);
-            border-color: var(--primary);
+        .floating-btn:hover {
+            transform: scale(1.1) rotate(90deg);
+            box-shadow: 0 15px 40px rgba(44, 90, 160, 0.5);
         }
         
-        .btn-outline-primary:hover {
-            background-color: var(--primary);
-            border-color: var(--primary);
-            color: white;
+        @media (max-width: 768px) {
+            .floating-btn {
+                bottom: 20px;
+                right: 20px;
+                width: 50px;
+                height: 50px;
+                font-size: 1.2rem;
+            }
         }
         
-        .btn-outline-primary.active {
-            background-color: var(--primary);
-            border-color: var(--primary);
-            color: white;
+        /* ============ UTILIDADES ============ */
+        .text-truncate-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
         
-        .alert-complement {
-            color: var(--complement-dark);
-            background-color: rgba(33, 150, 243, 0.1);
-            border-color: var(--complement-light);
+        .hover-lift {
+            transition: var(--transition);
         }
         
-        /* Formulario Registro */
-        .form-registro {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: var(--shadow-light);
-            margin-bottom: 25px;
+        .hover-lift:hover {
+            transform: translateY(-3px);
         }
         
-        /* Date and Time Inputs */
-        .datetime-input {
-            position: relative;
-        }
-        
-        .datetime-input input {
-            padding-right: 40px;
-        }
-        
-        .datetime-input i {
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--primary);
-            pointer-events: none;
-        }
-        
-        /* Flatpickr Customization */
-        .flatpickr-calendar {
-            border-radius: 15px;
-            box-shadow: var(--shadow-medium);
-            border: 1px solid var(--glass-border);
-        }
-        
-        .flatpickr-day.selected {
-            background: var(--primary);
-            border-color: var(--primary);
-        }
-        
-        .flatpickr-day.today {
-            border-color: var(--secondary);
-        }
-        
-        .flatpickr-day.today:hover {
-            background: var(--secondary-light);
-            border-color: var(--secondary);
-        }
-        
-        /* Time picker styling */
-        input[type="time"] {
-            font-family: 'Inter', sans-serif;
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
     </style>
-    <!-- Flatpickr CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 </head>
 <body>
     <?php if (!isset($_SESSION['usuario']) || !$_SESSION['usuario']['logueado']): ?>
-        <!-- Login Page -->
+        <!-- Login Page Mejorado -->
         <div class="login-container">
             <div class="login-card">
                 <div class="login-header">
                     <div class="login-icon">
                         <i class="fas fa-utensils"></i>
                     </div>
-                    <h2 class="fw-bold mb-2" style="color: var(--primary-dark);">Dashboard Chef</h2>
+                    <h2 class="fw-bold mb-2" style="color: var(--primary-dark);">¡Bienvenido Chef!</h2>
                     <p class="text-muted">Sistema Premium de Gestión de Comidas</p>
                 </div>
                 
                 <?php if (isset($error_login)): ?>
-                    <div class="alert alert-danger fade-in">
-                        <i class="fas fa-exclamation-circle me-2"></i><?php echo $error_login; ?>
+                    <div class="alert alert-danger fade-in d-flex align-items-center gap-2">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <span><?php echo $error_login; ?></span>
                     </div>
                 <?php endif; ?>
                 
@@ -1726,20 +2035,22 @@ if (isset($_GET['action'])) {
                     <div class="mb-4">
                         <label class="form-label fw-bold">Usuario</label>
                         <div class="input-group">
-                            <span class="input-group-text bg-light border-end-0">
+                            <span class="input-group-text bg-light border-end-0 rounded-start-4">
                                 <i class="fas fa-user text-primary"></i>
                             </span>
-                            <input type="text" name="usuario" class="form-control border-start-0" required>
+                            <input type="text" name="usuario" class="form-control border-start-0 rounded-end-4 py-3" 
+                                   placeholder="Ingresa tu usuario" required autofocus>
                         </div>
                     </div>
                     
                     <div class="mb-4">
                         <label class="form-label fw-bold">Contraseña</label>
                         <div class="input-group">
-                            <span class="input-group-text bg-light border-end-0">
+                            <span class="input-group-text bg-light border-end-0 rounded-start-4">
                                 <i class="fas fa-lock text-primary"></i>
                             </span>
-                            <input type="password" name="contrasena" class="form-control border-start-0" required>
+                            <input type="password" name="contrasena" class="form-control border-start-0 rounded-end-4 py-3" 
+                                   placeholder="••••••••" required>
                         </div>
                     </div>
                     
@@ -1751,30 +2062,29 @@ if (isset($_GET['action'])) {
         </div>
         
     <?php else: ?>
-        <!-- Dashboard -->
-        <!-- Navbar -->
+        <!-- Dashboard Mejorado -->
         <nav class="navbar navbar-premium">
             <div class="container-fluid">
                 <div class="d-flex align-items-center">
-                    <button class="toggle-sidebar me-3" onclick="toggleSidebar()">
+                    <button class="toggle-sidebar me-3" onclick="toggleSidebar()" aria-label="Toggle menu">
                         <i class="fas fa-bars"></i>
                     </button>
                     <a class="navbar-brand-premium" href="?page=comidas">
-                        <i class="fas fa-crown"></i>Dashboard Chef
+                        <i class="fas fa-crown"></i>
+                        <span>Dashboard Chef</span>
                     </a>
                 </div>
                 
-                <div class="navbar-nav ms-auto">
-                    <div class="nav-item dropdown">
-                        <a class="nav-link text-white d-flex align-items-center" href="#" role="button" data-bs-toggle="dropdown">
-                            <div class="me-2">
-                                <i class="fas fa-user-circle fa-2x"></i>
-                            </div>
-                            <div>
+                <div class="d-flex align-items-center">
+                    <div class="dropdown">
+                        <div class="user-dropdown d-flex align-items-center text-white" data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle fa-2x me-2"></i>
+                            <div class="d-none d-sm-block">
                                 <div class="fw-bold"><?php echo $_SESSION['usuario']['nombre']; ?></div>
-                                <div class="small opacity-75">Chef Principal</div>
+                                <small class="opacity-75">Chef Principal</small>
                             </div>
-                        </a>
+                            <i class="fas fa-chevron-down ms-2 small"></i>
+                        </div>
                         <div class="dropdown-menu dropdown-menu-end">
                             <a class="dropdown-item" href="?page=configuracion">
                                 <i class="fas fa-cog me-2"></i>Configuración
@@ -1792,12 +2102,14 @@ if (isset($_GET['action'])) {
         <!-- Sidebar -->
         <div class="sidebar-container" id="sidebar">
             <div class="sidebar-header">
+                <div class="user-avatar">
+                    <i class="fas fa-user-tie"></i>
+                </div>
                 <div class="user-info text-center">
-                    <div class="mb-3">
-                        <i class="fas fa-user-circle fa-4x text-primary"></i>
-                    </div>
                     <h5><?php echo $_SESSION['usuario']['nombre']; ?></h5>
-                    <p><span class="badge bg-warning text-dark">Chef Principal</span></p>
+                    <span class="badge bg-warning text-dark px-3 py-2">
+                        <i class="fas fa-crown me-1"></i>Chef Principal
+                    </span>
                 </div>
             </div>
             
@@ -1805,16 +2117,19 @@ if (isset($_GET['action'])) {
                 <a href="?page=comidas" class="menu-item <?php echo $pagina_actual == 'comidas' ? 'active' : ''; ?>">
                     <i class="fas fa-utensils"></i>
                     <span>Comidas a Servir</span>
+                    <span class="badge bg-warning ms-auto" id="sidebar-comidas-count" style="display: none;">0</span>
                 </a>
                 
                 <a href="?page=complementos" class="menu-item <?php echo $pagina_actual == 'complementos' ? 'active' : ''; ?>">
                     <i class="fas fa-mug-hot"></i>
                     <span>Complementos</span>
+                    <span class="badge bg-warning ms-auto" id="sidebar-complementos-count" style="display: none;">0</span>
                 </a>
                 
                 <a href="?page=registros" class="menu-item <?php echo $pagina_actual == 'registros' ? 'active' : ''; ?>">
                     <i class="fas fa-clipboard-list"></i>
                     <span>Registros de Comida</span>
+                    <span class="badge bg-warning ms-auto" id="sidebar-registros-count" style="display: none;">0</span>
                 </a>
                 
                 <a href="?page=asignar" class="menu-item <?php echo $pagina_actual == 'asignar' ? 'active' : ''; ?>">
@@ -1827,26 +2142,31 @@ if (isset($_GET['action'])) {
                     <span>Configuración</span>
                 </a>
                 
-                <div class="mt-4 pt-3 border-top">
-                    <a href="?logout=1" class="menu-item text-danger">
-                        <i class="fas fa-sign-out-alt"></i>
-                        <span>Cerrar Sesión</span>
-                    </a>
-                </div>
+                <hr class="my-3 mx-3">
+                
+                <a href="?logout=1" class="menu-item text-danger">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Cerrar Sesión</span>
+                </a>
             </div>
         </div>
         
         <!-- Main Content -->
         <div class="main-content" id="mainContent">
             <?php if ($pagina_actual == 'comidas'): ?>
-                <!-- Módulo: Comidas a Servir -->
+                <!-- MÓDULO: COMIDAS A SERVIR MEJORADO - CON BADGES DE ESTADO CORREGIDOS -->
                 <div class="dashboard-card fade-in">
-                    <div class="card-header-premium d-flex justify-content-between align-items-center">
+                    <div class="card-header-premium">
                         <h3 class="card-title-premium">
-                            <i class="fas fa-utensils"></i>Comidas a Servir - HOY
+                            <i class="fas fa-utensils"></i>
+                            <span>Comidas a Servir - HOY</span>
+                            <span class="turno-indicator <?php echo date('H') < 12 ? 'turno-desayuno' : 'turno-comida'; ?>">
+                                <i class="fas <?php echo date('H') < 12 ? 'fa-sun' : 'fa-utensils'; ?>"></i>
+                                <?php echo $turnoActual; ?>
+                            </span>
                         </h3>
-                        <div>
-                            <span class="badge badge-primary-premium me-2">
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-primary px-3 py-2">
                                 <i class="fas fa-calendar-day me-1"></i><?php echo date('d-m-Y'); ?>
                             </span>
                             <button class="btn-premium btn-sm" onclick="cargarDashboard()">
@@ -1855,111 +2175,203 @@ if (isset($_GET['action'])) {
                         </div>
                     </div>
                     
-                    <!-- Estadísticas -->
-                    <div class="row mb-4">
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card fade-in">
-                                <div class="stat-icon">
-                                    <i class="fas fa-utensils"></i>
+                    <div class="split-layout">
+                        <!-- SECCIÓN COMIDAS -->
+                        <div class="comidas-section">
+                            <div class="row g-3 mb-4">
+                                <div class="col-6">
+                                    <div class="stat-card">
+                                        <div class="stat-icon">
+                                            <i class="fas fa-clock"></i>
+                                        </div>
+                                        <h4 id="comidas-pendientes" class="fw-bold mb-1">0</h4>
+                                        <p class="text-muted mb-0 small">Pendientes</p>
+                                        <small id="pendientes-horario" class="text-warning small"></small>
+                                    </div>
                                 </div>
-                                <h3 id="total-comidas" class="fw-bold mb-2">0</h3>
-                                <p class="text-muted mb-0">Total Comidas Hoy</p>
-                            </div>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card success fade-in">
-                                <div class="stat-icon success">
-                                    <i class="fas fa-check-circle"></i>
+                                <div class="col-6">
+                                    <div class="stat-card success">
+                                        <div class="stat-icon success">
+                                            <i class="fas fa-check-circle"></i>
+                                        </div>
+                                        <h4 id="comidas-atendidas" class="fw-bold mb-1">0</h4>
+                                        <p class="text-muted mb-0 small">Atendidas</p>
+                                        <small id="atendidas-porcentaje" class="text-success small"></small>
+                                    </div>
                                 </div>
-                                <h3 id="comidas-atendidas" class="fw-bold mb-2">0</h3>
-                                <p class="text-muted mb-0">Atendidas Hoy</p>
                             </div>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card warning fade-in">
-                                <div class="stat-icon warning">
-                                    <i class="fas fa-clock"></i>
+                            
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="fw-bold mb-0">
+                                    <i class="fas fa-list me-2"></i>Lista de Comidas
+                                    <span class="badge bg-warning ms-2" id="notification-count" style="display: none;">0</span>
+                                </h6>
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <button type="button" class="btn btn-outline-primary active" onclick="filtrarComidas('todas')">Todas</button>
+                                    <button type="button" class="btn btn-outline-primary" onclick="filtrarComidas('pendientes')">Pendientes</button>
+                                    <button type="button" class="btn btn-outline-primary" onclick="filtrarComidas('atendidas')">Atendidas</button>
                                 </div>
-                                <h3 id="comidas-pendientes" class="fw-bold mb-2">0</h3>
-                                <p class="text-muted mb-0">Pendientes Ahora</p>
                             </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Filtros -->
-                    <div class="row mb-4">
-                        <div class="col-12">
-                            <div class="d-flex justify-content-between align-items-center mb-4">
-                                <h4 class="fw-bold d-flex align-items-center" style="color: var(--primary-dark);">
-                                    <i class="fas fa-list me-3"></i>Lista de Comidas
-                                    <span class="badge bg-warning ms-3" id="notification-count" style="display: none;">0</span>
-                                </h4>
-                                <div class="btn-group" role="group">
-                                    <button type="button" class="btn btn-outline-primary active" onclick="filtrarComidas('todas')">
-                                        <i class="fas fa-list me-1"></i> Todas
-                                    </button>
-                                    <button type="button" class="btn btn-outline-primary" onclick="filtrarComidas('pendientes')">
-                                        <i class="fas fa-clock me-1"></i> Pendientes
-                                    </button>
-                                    <button type="button" class="btn btn-outline-primary" onclick="filtrarComidas('atendidas')">
-                                        <i class="fas fa-check-circle me-1"></i> Atendidas
-                                    </button>
+                            
+                            <div id="vista-comidas" style="max-height: 550px; overflow-y: auto; padding-right: 5px;">
+                                <div class="text-center py-5">
+                                    <div class="loading-spinner mx-auto mb-3"></div>
+                                    <p class="text-muted">Cargando comidas...</p>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Lista de Comidas -->
-                    <div id="vista-comidas" class="row">
-                        <div class="col-12 text-center py-5">
-                            <div class="loading-spinner mx-auto mb-3"></div>
-                            <p class="text-muted">Cargando comidas...</p>
+                        
+                        <!-- SECCIÓN HORARIOS Y PERSONAL -->
+                        <div class="horarios-section">
+                            <div class="horarios-banner">
+                                <div class="d-flex align-items-center gap-3 mb-3">
+                                    <i class="fas fa-clock fa-2x"></i>
+                                    <div>
+                                        <span class="text-uppercase small opacity-75">Hora actual</span>
+                                        <div class="digital-clock" id="relojDigital"><?php echo date('H:i:s'); ?></div>
+                                    </div>
+                                </div>
+                                
+                                <div id="contenedorBloqueActual">
+                                    <?php if ($bloqueActual['activo']): ?>
+                                        <div class="bloque-activo">
+                                            <span class="badge bg-warning text-dark mb-2">
+                                                <i class="fas fa-bell me-1"></i>ACTIVO AHORA
+                                            </span>
+                                            <h5 class="text-white mb-1"><?php echo $bloqueActual['nombre']; ?></h5>
+                                            <p class="text-white-50 mb-0 small">
+                                                <i class="fas fa-clock me-1"></i><?php echo $bloqueActual['inicio']; ?> - <?php echo $bloqueActual['fin']; ?>
+                                            </p>
+                                        </div>
+                                    <?php elseif (isset($bloqueActual['mensaje']) && strpos($bloqueActual['mensaje'], 'Próximo') !== false): ?>
+                                        <div class="bg-white-10 p-4 rounded" style="background: rgba(255,255,255,0.1);">
+                                            <span class="badge bg-secondary mb-2">
+                                                <i class="fas fa-hourglass-half me-1"></i>PRÓXIMO
+                                            </span>
+                                            <h5 class="text-white mb-1"><?php echo $bloqueActual['mensaje']; ?></h5>
+                                            <p class="text-white-50 mb-0 small">
+                                                <i class="fas fa-clock me-1"></i><?php echo $bloqueActual['inicio'] ?? '--:--'; ?> - <?php echo $bloqueActual['fin'] ?? '--:--'; ?>
+                                            </p>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="bg-white-10 p-4 rounded" style="background: rgba(255,255,255,0.1);">
+                                            <span class="badge bg-secondary mb-2">
+                                                <i class="fas fa-moon me-1"></i>DESCANSO
+                                            </span>
+                                            <h5 class="text-white mb-0"><?php echo $bloqueActual['mensaje'] ?? 'No hay turno'; ?></h5>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            
+                            <div class="bloque-tabs">
+                                <div class="bloque-tab active" onclick="mostrarBloque('bloque1')" id="tab-bloque1">
+                                    <i class="fas fa-circle" style="color: #4CAF50;"></i> BLOQUE 1
+                                    <span class="badge bg-primary ms-1">28</span>
+                                </div>
+                                <div class="bloque-tab" onclick="mostrarBloque('bloque2')" id="tab-bloque2">
+                                    <i class="fas fa-circle" style="color: #FF9800;"></i> BLOQUE 2
+                                    <span class="badge bg-primary ms-1">21</span>
+                                </div>
+                                <div class="bloque-tab" onclick="mostrarBloque('bloque3')" id="tab-bloque3">
+                                    <i class="fas fa-circle" style="color: #9C27B0;"></i> BLOQUE 3
+                                    <span class="badge bg-primary ms-1">22</span>
+                                </div>
+                                <div class="bloque-tab" onclick="mostrarBloque('bloque4')" id="tab-bloque4">
+                                    <i class="fas fa-circle" style="color: #F44336;"></i> BLOQUE 4
+                                    <span class="badge bg-primary ms-1">28</span>
+                                </div>
+                            </div>
+                            
+                            <div class="estados-leyenda">
+                                <span><i class="fas fa-check-circle text-success me-1"></i> ATENDIDO</span>
+                                <span><i class="fas fa-clock text-warning me-1"></i> EN FILA</span>
+                                <span><i class="fas <?php echo date('H') < 12 ? 'fa-sun' : 'fa-utensils'; ?> me-1" style="color: <?php echo $colorTurno; ?>;"></i> <?php echo $turnoActual; ?> AGENDADO</span>
+                                <span><i class="fas fa-hourglass text-secondary me-1"></i> SIN REGISTRO</span>
+                            </div>
+                            
+                            <div id="contenedor-personal">
+                                <!-- BLOQUE 1 -->
+                                <div id="personal-bloque1">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h6 class="fw-bold mb-0">
+                                            <i class="fas fa-users me-2"></i>BLOQUE 1 - Personal
+                                        </h6>
+                                        <span class="badge bg-primary">28</span>
+                                    </div>
+                                    <div class="personal-grid" id="grid-bloque1"></div>
+                                </div>
+                                
+                                <!-- BLOQUE 2 -->
+                                <div id="personal-bloque2" style="display: none;">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h6 class="fw-bold mb-0">
+                                            <i class="fas fa-users me-2"></i>BLOQUE 2 - Personal
+                                        </h6>
+                                        <span class="badge bg-primary">21</span>
+                                    </div>
+                                    <div class="personal-grid" id="grid-bloque2"></div>
+                                </div>
+                                
+                                <!-- BLOQUE 3 -->
+                                <div id="personal-bloque3" style="display: none;">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h6 class="fw-bold mb-0">
+                                            <i class="fas fa-users me-2"></i>BLOQUE 3 - Personal
+                                        </h6>
+                                        <span class="badge bg-primary">22</span>
+                                    </div>
+                                    <div class="personal-grid" id="grid-bloque3"></div>
+                                </div>
+                                
+                                <!-- BLOQUE 4 -->
+                                <div id="personal-bloque4" style="display: none;">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h6 class="fw-bold mb-0">
+                                            <i class="fas fa-users me-2"></i>BLOQUE 4 - Personal
+                                        </h6>
+                                        <span class="badge bg-primary">28</span>
+                                    </div>
+                                    <div class="personal-grid" id="grid-bloque4"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Modal de Confirmación -->
+                <!-- Modal Confirmación Mejorado -->
                 <div class="modal fade" id="confirmModal" tabindex="-1">
                     <div class="modal-dialog modal-dialog-centered">
-                        <div class="modal-content">
-                            <div class="modal-header bg-success text-white">
-                                <h5 class="modal-title fw-bold">
+                        <div class="modal-content border-0 shadow-lg">
+                            <div class="modal-header bg-success text-white border-0">
+                                <h6 class="modal-title fw-bold">
                                     <i class="fas fa-check-circle me-2"></i>Confirmar Atención
-                                </h5>
+                                </h6>
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
-                            <div class="modal-body text-center">
+                            <div class="modal-body text-center py-4">
                                 <i class="fas fa-utensils fa-4x text-success mb-3"></i>
-                                <h5 id="modal-empleado" class="fw-bold mb-3"></h5>
-                                <p>¿Marcar esta comida como atendida?</p>
-                                <div class="alert alert-info">
-                                    <small>
-                                        <i class="fas fa-info-circle me-1"></i>
-                                        La comida cambiará de "Pendiente" a "Atendida"
-                                    </small>
-                                </div>
+                                <h5 id="modal-empleado" class="fw-bold mb-2"></h5>
+                                <p class="text-muted mb-0">¿Marcar esta comida como atendida?</p>
                             </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                                    <i class="fas fa-times me-2"></i>Cancelar
-                                </button>
-                                <button type="button" class="btn btn-success" id="confirmAtender">
-                                    <i class="fas fa-check me-2"></i>Sí, Atender
-                                </button>
+                            <div class="modal-footer border-0">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                <button type="button" class="btn btn-success" id="confirmAtender">Sí, Atender</button>
                             </div>
                         </div>
                     </div>
                 </div>
                 
             <?php elseif ($pagina_actual == 'complementos'): ?>
-                <!-- Módulo: Complementos -->
+                <!-- MÓDULO: COMPLEMENTOS MEJORADO -->
                 <div class="dashboard-card fade-in">
-                    <div class="card-header-premium d-flex justify-content-between align-items-center">
+                    <div class="card-header-premium">
                         <h3 class="card-title-premium">
-                            <i class="fas fa-mug-hot complemento-icon"></i>Complementos - HOY
+                            <i class="fas fa-mug-hot"></i>
+                            <span>Complementos - HOY</span>
                         </h3>
-                        <div>
-                            <span class="badge badge-primary-premium me-2">
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-primary px-3 py-2">
                                 <i class="fas fa-calendar-day me-1"></i><?php echo date('d-m-Y'); ?>
                             </span>
                             <button class="btn-complement btn-sm" onclick="cargarComplementosDashboard()">
@@ -1968,62 +2380,49 @@ if (isset($_GET['action'])) {
                         </div>
                     </div>
                     
-                    <!-- Estadísticas -->
-                    <div class="row mb-4">
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card complement fade-in">
+                    <div class="row g-4 mb-4">
+                        <div class="col-md-4">
+                            <div class="stat-card complement">
                                 <div class="stat-icon complement">
                                     <i class="fas fa-mug-hot"></i>
                                 </div>
-                                <h3 id="total-complementos" class="fw-bold mb-2">0</h3>
+                                <h3 id="total-complementos" class="fw-bold mb-1">0</h3>
                                 <p class="text-muted mb-0">Total Complementos</p>
                             </div>
                         </div>
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card success fade-in">
+                        <div class="col-md-4">
+                            <div class="stat-card success">
                                 <div class="stat-icon success">
                                     <i class="fas fa-check-circle"></i>
                                 </div>
-                                <h3 id="complementos-atendidos" class="fw-bold mb-2">0</h3>
+                                <h3 id="complementos-atendidos" class="fw-bold mb-1">0</h3>
                                 <p class="text-muted mb-0">Atendidos Hoy</p>
                             </div>
                         </div>
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card warning fade-in">
+                        <div class="col-md-4">
+                            <div class="stat-card warning">
                                 <div class="stat-icon warning">
                                     <i class="fas fa-clock"></i>
                                 </div>
-                                <h3 id="complementos-pendientes" class="fw-bold mb-2">0</h3>
+                                <h3 id="complementos-pendientes" class="fw-bold mb-1">0</h3>
                                 <p class="text-muted mb-0">Pendientes Ahora</p>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Filtros -->
-                    <div class="row mb-4">
-                        <div class="col-12">
-                            <div class="d-flex justify-content-between align-items-center mb-4">
-                                <h4 class="fw-bold d-flex align-items-center" style="color: var(--complement-dark);">
-                                    <i class="fas fa-list me-3 complemento-icon"></i>Lista de Complementos
-                                    <span class="badge bg-warning ms-3" id="notification-count-complementos" style="display: none;">0</span>
-                                </h4>
-                                <div class="btn-group" role="group">
-                                    <button type="button" class="btn btn-outline-complement active" onclick="filtrarComplementos('todas')">
-                                        <i class="fas fa-list me-1"></i> Todas
-                                    </button>
-                                    <button type="button" class="btn btn-outline-complement" onclick="filtrarComplementos('pendientes')">
-                                        <i class="fas fa-clock me-1"></i> Pendientes
-                                    </button>
-                                    <button type="button" class="btn btn-outline-complement" onclick="filtrarComplementos('atendidas')">
-                                        <i class="fas fa-check-circle me-1"></i> Atendidas
-                                    </button>
-                                </div>
-                            </div>
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h4 class="fw-bold d-flex align-items-center">
+                            <i class="fas fa-list me-3 text-primary"></i>Lista de Complementos
+                            <span class="badge bg-warning ms-3" id="notification-count-complementos" style="display: none;">0</span>
+                        </h4>
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-outline-primary active" onclick="filtrarComplementos('todas')">Todas</button>
+                            <button type="button" class="btn btn-outline-primary" onclick="filtrarComplementos('pendientes')">Pendientes</button>
+                            <button type="button" class="btn btn-outline-primary" onclick="filtrarComplementos('atendidas')">Atendidas</button>
                         </div>
                     </div>
                     
-                    <!-- Lista de Complementos -->
-                    <div id="vista-complementos" class="row">
+                    <div id="vista-complementos" class="row g-4">
                         <div class="col-12 text-center py-5">
                             <div class="loading-spinner mx-auto mb-3"></div>
                             <p class="text-muted">Cargando complementos...</p>
@@ -2031,52 +2430,43 @@ if (isset($_GET['action'])) {
                     </div>
                 </div>
                 
-                <!-- Modal de Confirmación Complementos -->
+                <!-- Modal Confirmación Complementos Mejorado -->
                 <div class="modal fade" id="confirmModalComplemento" tabindex="-1">
                     <div class="modal-dialog modal-dialog-centered">
-                        <div class="modal-content">
-                            <div class="modal-header bg-complement text-white" style="background: var(--complement-color);">
+                        <div class="modal-content border-0 shadow-lg">
+                            <div class="modal-header" style="background: var(--complement-color); color: white;" class="border-0">
                                 <h5 class="modal-title fw-bold">
                                     <i class="fas fa-check-circle me-2"></i>Confirmar Atención
                                 </h5>
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
-                            <div class="modal-body text-center">
-                                <i class="fas fa-mug-hot fa-4x complemento-icon mb-3"></i>
+                            <div class="modal-body text-center py-4">
+                                <i class="fas fa-mug-hot fa-4x mb-3" style="color: var(--complement-color);"></i>
                                 <h5 id="modal-empleado-complemento" class="fw-bold mb-3"></h5>
-                                <div class="alert alert-complement mb-3" style="background: rgba(33, 150, 243, 0.1); border-color: var(--complement-color);">
-                                    <i class="fas fa-mug-hot me-2 complemento-icon"></i>
+                                <div class="alert alert-info border-0">
+                                    <i class="fas fa-mug-hot me-2"></i>
                                     <span id="modal-complemento" class="fw-bold"></span>
                                 </div>
-                                <p>¿Marcar este complemento como atendido?</p>
-                                <div class="alert alert-info">
-                                    <small>
-                                        <i class="fas fa-info-circle me-1"></i>
-                                        El complemento cambiará de "Pendiente" a "Atendido"
-                                    </small>
-                                </div>
+                                <p class="text-muted">¿Marcar este complemento como atendido?</p>
                             </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                                    <i class="fas fa-times me-2"></i>Cancelar
-                                </button>
-                                <button type="button" class="btn btn-success" id="confirmAtenderComplemento">
-                                    <i class="fas fa-check me-2"></i>Sí, Atender
-                                </button>
+                            <div class="modal-footer border-0">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                <button type="button" class="btn btn-success" id="confirmAtenderComplemento">Sí, Atender</button>
                             </div>
                         </div>
                     </div>
                 </div>
                 
             <?php elseif ($pagina_actual == 'registros'): ?>
-                <!-- Módulo: Registros de Comida -->
+                <!-- MÓDULO: REGISTROS DE COMIDA MEJORADO -->
                 <div class="dashboard-card fade-in">
-                    <div class="card-header-premium d-flex justify-content-between align-items-center">
+                    <div class="card-header-premium">
                         <h3 class="card-title-premium">
-                            <i class="fas fa-clipboard-list"></i>Registros de Comida - HOY
+                            <i class="fas fa-clipboard-list"></i>
+                            <span>Registros de Comida - HOY</span>
                         </h3>
-                        <div>
-                            <span class="badge badge-primary-premium me-2">
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-primary px-3 py-2">
                                 <i class="fas fa-calendar-day me-1"></i><?php echo date('d-m-Y'); ?>
                             </span>
                             <button class="btn-premium btn-sm" onclick="cargarRegistrosDashboard()">
@@ -2085,45 +2475,43 @@ if (isset($_GET['action'])) {
                         </div>
                     </div>
                     
-                    <!-- Estadísticas -->
-                    <div class="row mb-4">
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card fade-in">
+                    <div class="row g-4 mb-4">
+                        <div class="col-md-4">
+                            <div class="stat-card">
                                 <div class="stat-icon">
                                     <i class="fas fa-clipboard-list"></i>
                                 </div>
-                                <h3 id="total-registros" class="fw-bold mb-2">0</h3>
+                                <h3 id="total-registros" class="fw-bold mb-1">0</h3>
                                 <p class="text-muted mb-0">Total Registros Hoy</p>
                             </div>
                         </div>
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card success fade-in">
+                        <div class="col-md-4">
+                            <div class="stat-card success">
                                 <div class="stat-icon success">
                                     <i class="fas fa-check-circle"></i>
                                 </div>
-                                <h3 id="registros-atendidos" class="fw-bold mb-2">0</h3>
+                                <h3 id="registros-atendidos" class="fw-bold mb-1">0</h3>
                                 <p class="text-muted mb-0">Atendidos Hoy</p>
                             </div>
                         </div>
-                        <div class="col-md-4 mb-3">
-                            <div class="stat-card warning fade-in">
+                        <div class="col-md-4">
+                            <div class="stat-card warning">
                                 <div class="stat-icon warning">
                                     <i class="fas fa-clock"></i>
                                 </div>
-                                <h3 id="registros-pendientes" class="fw-bold mb-2">0</h3>
+                                <h3 id="registros-pendientes" class="fw-bold mb-1">0</h3>
                                 <p class="text-muted mb-0">Pendientes Ahora</p>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Formulario para crear registro -->
-                    <div class="form-registro fade-in">
-                        <h4 class="fw-bold mb-3">
-                            <i class="fas fa-plus-circle me-2"></i>Nuevo Registro
+                    <div class="form-registro">
+                        <h4 class="fw-bold mb-4">
+                            <i class="fas fa-plus-circle me-2 text-primary"></i>Nuevo Registro
                         </h4>
                         <form id="formCrearRegistro">
-                            <div class="row">
-                                <div class="col-md-4 mb-3">
+                            <div class="row g-3">
+                                <div class="col-md-4">
                                     <label class="form-label fw-bold">Nombre</label>
                                     <select name="nombre_corto" class="form-select" required>
                                         <option value="">Seleccionar empleado...</option>
@@ -2133,23 +2521,25 @@ if (isset($_GET['action'])) {
                                     </select>
                                 </div>
                                 
-                                <div class="col-md-3 mb-3 datetime-input">
+                                <div class="col-md-3">
                                     <label class="form-label fw-bold">Fecha (dd-mm-yyyy)</label>
-                                    <input type="text" name="fecha_real" class="form-control flatpickr-date" 
-                                           id="fechaPicker" required 
-                                           placeholder="Seleccionar fecha">
-                                    <i class="fas fa-calendar"></i>
+                                    <div class="datetime-input">
+                                        <input type="text" name="fecha_real" class="form-control flatpickr-date" 
+                                               id="fechaPicker" required placeholder="dd-mm-yyyy">
+                                        <i class="fas fa-calendar"></i>
+                                    </div>
                                 </div>
                                 
-                                <div class="col-md-3 mb-3 datetime-input">
+                                <div class="col-md-3">
                                     <label class="form-label fw-bold">Hora (HH:MM:SS)</label>
-                                    <input type="text" name="hora_real" class="form-control flatpickr-time" 
-                                           id="horaPicker" required 
-                                           placeholder="Seleccionar hora">
-                                    <i class="fas fa-clock"></i>
+                                    <div class="datetime-input">
+                                        <input type="text" name="hora_real" class="form-control flatpickr-time" 
+                                               id="horaPicker" required placeholder="HH:MM:SS">
+                                        <i class="fas fa-clock"></i>
+                                    </div>
                                 </div>
                                 
-                                <div class="col-md-2 mb-3 d-flex align-items-end">
+                                <div class="col-md-2 d-flex align-items-end">
                                     <button type="submit" class="btn-premium w-100">
                                         <i class="fas fa-save me-2"></i>Guardar
                                     </button>
@@ -2158,31 +2548,19 @@ if (isset($_GET['action'])) {
                         </form>
                     </div>
                     
-                    <!-- Filtros -->
-                    <div class="row mb-4">
-                        <div class="col-12">
-                            <div class="d-flex justify-content-between align-items-center mb-4">
-                                <h4 class="fw-bold d-flex align-items-center" style="color: var(--primary-dark);">
-                                    <i class="fas fa-list me-3"></i>Registros de Hoy
-                                    <span class="badge bg-warning ms-3" id="notification-count-registros" style="display: none;">0</span>
-                                </h4>
-                                <div class="btn-group" role="group">
-                                    <button type="button" class="btn btn-outline-primary active" onclick="filtrarRegistros('todas')">
-                                        <i class="fas fa-list me-1"></i> Todas
-                                    </button>
-                                    <button type="button" class="btn btn-outline-primary" onclick="filtrarRegistros('pendientes')">
-                                        <i class="fas fa-clock me-1"></i> Pendientes
-                                    </button>
-                                    <button type="button" class="btn btn-outline-primary" onclick="filtrarRegistros('atendidas')">
-                                        <i class="fas fa-check-circle me-1"></i> Atendidas
-                                    </button>
-                                </div>
-                            </div>
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h4 class="fw-bold d-flex align-items-center">
+                            <i class="fas fa-list me-3 text-primary"></i>Registros de Hoy
+                            <span class="badge bg-warning ms-3" id="notification-count-registros" style="display: none;">0</span>
+                        </h4>
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-outline-primary active" onclick="filtrarRegistros('todas')">Todas</button>
+                            <button type="button" class="btn btn-outline-primary" onclick="filtrarRegistros('pendientes')">Pendientes</button>
+                            <button type="button" class="btn btn-outline-primary" onclick="filtrarRegistros('atendidas')">Atendidas</button>
                         </div>
                     </div>
                     
-                    <!-- Lista de Registros -->
-                    <div id="vista-registros" class="row">
+                    <div id="vista-registros" class="row g-4">
                         <div class="col-12 text-center py-5">
                             <div class="loading-spinner mx-auto mb-3"></div>
                             <p class="text-muted">Cargando registros...</p>
@@ -2191,15 +2569,15 @@ if (isset($_GET['action'])) {
                 </div>
                 
             <?php elseif ($pagina_actual == 'asignar'): ?>
-                <!-- Módulo: Asignar Comidas -->
-                <?php $empleados = getEmpleados(); ?>
+                <!-- MÓDULO: ASIGNAR COMIDAS MEJORADO -->
                 <div class="dashboard-card fade-in">
-                    <div class="card-header-premium d-flex justify-content-between align-items-center">
+                    <div class="card-header-premium">
                         <h3 class="card-title-premium">
-                            <i class="fas fa-tasks"></i>Asignar Comidas - Cancelaciones de HOY
+                            <i class="fas fa-tasks"></i>
+                            <span>Cancelaciones Asignadas - HOY</span>
                         </h3>
-                        <div>
-                            <span class="badge badge-primary-premium me-2">
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-primary px-3 py-2">
                                 <i class="fas fa-calendar-day me-1"></i><?php echo date('d-m-Y'); ?>
                             </span>
                             <button class="btn-premium btn-sm" onclick="cargarCancelaciones()">
@@ -2208,60 +2586,49 @@ if (isset($_GET['action'])) {
                         </div>
                     </div>
                     
-                    <!-- Estadísticas -->
-                    <div class="row mb-4">
-                        <div class="col-md-3 mb-3">
-                            <div class="stat-card fade-in">
+                    <div class="row g-4 mb-4">
+                        <div class="col-md-4">
+                            <div class="stat-card">
                                 <div class="stat-icon">
                                     <i class="fas fa-list"></i>
                                 </div>
-                                <h3 id="total-cancelaciones" class="fw-bold mb-2">0</h3>
-                                <p class="text-muted mb-0">Total Cancelaciones</p>
+                                <h3 id="total-cancelaciones" class="fw-bold mb-1">0</h3>
+                                <p class="text-muted mb-0">Cancelaciones Asignadas</p>
                             </div>
                         </div>
-                        <div class="col-md-3 mb-3">
-                            <div class="stat-card success fade-in">
+                        <div class="col-md-4">
+                            <div class="stat-card success">
                                 <div class="stat-icon success">
                                     <i class="fas fa-check-circle"></i>
                                 </div>
-                                <h3 id="cancelaciones-asignadas" class="fw-bold mb-2">0</h3>
-                                <p class="text-muted mb-0">Asignadas</p>
+                                <h3 id="cancelaciones-aprobadas" class="fw-bold mb-1">0</h3>
+                                <p class="text-muted mb-0">Aprobadas</p>
                             </div>
                         </div>
-                        <div class="col-md-3 mb-3">
-                            <div class="stat-card warning fade-in">
-                                <div class="stat-icon warning">
-                                    <i class="fas fa-clock"></i>
+                        <div class="col-md-4">
+                            <div class="stat-card" style="border-top-color: #6c757d;">
+                                <div class="stat-icon" style="background: linear-gradient(145deg, #6c757d, #495057);">
+                                    <i class="fas fa-calendar-check"></i>
                                 </div>
-                                <h3 id="cancelaciones-disponibles" class="fw-bold mb-2">0</h3>
-                                <p class="text-muted mb-0">Disponibles</p>
-                            </div>
-                        </div>
-                        <div class="col-md-3 mb-3">
-                            <div class="stat-card fade-in">
-                                <div class="stat-icon" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%);">
-                                    <i class="fas fa-users"></i>
-                                </div>
-                                <h3 id="total-empleados" class="fw-bold mb-2"><?php echo count($empleados); ?></h3>
-                                <p class="text-muted mb-0">Empleados</p>
+                                <h3 class="fw-bold mb-1"><?php echo date('d/m/Y'); ?></h3>
+                                <p class="text-muted mb-0">Fecha de Hoy</p>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Vista Tarjetas -->
-                    <div id="vista-cancelaciones" class="row">
+                    <div id="vista-cancelaciones" class="row g-4">
                         <div class="col-12 text-center py-5">
                             <div class="loading-spinner mx-auto mb-3"></div>
-                            <p class="text-muted">Cargando cancelaciones...</p>
+                            <p class="text-muted">Cargando cancelaciones asignadas...</p>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Modal para Asignar -->
+                <!-- Modal para Asignar (Mantenido por compatibilidad) -->
                 <div class="modal fade" id="asignarModal" tabindex="-1">
                     <div class="modal-dialog modal-dialog-centered">
-                        <div class="modal-content">
-                            <div class="modal-header bg-primary text-white">
+                        <div class="modal-content border-0 shadow-lg">
+                            <div class="modal-header bg-primary text-white border-0">
                                 <h5 class="modal-title fw-bold">
                                     <i class="fas fa-user-plus me-2"></i>Asignar Cancelación
                                 </h5>
@@ -2279,11 +2646,9 @@ if (isset($_GET['action'])) {
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
-                                <div id="asignar-info" class="alert alert-info">
-                                    <!-- Información de la cancelación -->
-                                </div>
+                                <div id="asignar-info" class="alert alert-info"></div>
                             </div>
-                            <div class="modal-footer">
+                            <div class="modal-footer border-0">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                                     <i class="fas fa-times me-2"></i>Cancelar
                                 </button>
@@ -2296,61 +2661,74 @@ if (isset($_GET['action'])) {
                 </div>
                 
             <?php elseif ($pagina_actual == 'configuracion'): ?>
-                <!-- Módulo: Configuración -->
+                <!-- MÓDULO: CONFIGURACIÓN MEJORADO -->
                 <div class="dashboard-card fade-in">
                     <div class="card-header-premium">
                         <h3 class="card-title-premium">
-                            <i class="fas fa-cog"></i>Configuración del Sistema
+                            <i class="fas fa-cog"></i>
+                            <span>Configuración del Sistema</span>
                         </h3>
                     </div>
                     
-                    <div class="row">
-                        <div class="col-md-6 mb-4">
-                            <div class="card h-100">
+                    <div class="row g-4">
+                        <div class="col-md-6">
+                            <div class="card border-0 shadow-sm h-100">
                                 <div class="card-body">
-                                    <h5 class="card-title text-primary">
+                                    <h5 class="card-title text-primary fw-bold mb-4">
                                         <i class="fas fa-user me-2"></i>Información del Usuario
                                     </h5>
-                                    <div class="mt-4">
-                                        <div class="mb-3">
-                                            <label class="form-label fw-bold">Nombre</label>
-                                            <input type="text" class="form-control" value="<?php echo $_SESSION['usuario']['nombre']; ?>" readonly>
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label fw-bold">Rol</label>
-                                            <input type="text" class="form-control" value="Chef Principal" readonly>
-                                        </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold text-muted small">Nombre</label>
+                                        <input type="text" class="form-control" value="<?php echo $_SESSION['usuario']['nombre']; ?>" readonly>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold text-muted small">Rol</label>
+                                        <input type="text" class="form-control" value="Chef Principal" readonly>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold text-muted small">Último acceso</label>
+                                        <input type="text" class="form-control" value="<?php echo date('d/m/Y H:i:s'); ?>" readonly>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         
-                        <div class="col-md-6 mb-4">
-                            <div class="card h-100">
+                        <div class="col-md-6">
+                            <div class="card border-0 shadow-sm h-100">
                                 <div class="card-body">
-                                    <h5 class="card-title text-primary">
+                                    <h5 class="card-title text-primary fw-bold mb-4">
                                         <i class="fas fa-database me-2"></i>Conexión a Base de Datos
                                     </h5>
-                                    <div class="mt-4">
-                                        <div class="mb-3">
-                                            <label class="form-label fw-bold">Servidor</label>
-                                            <input type="text" class="form-control" value="<?= htmlspecialchars(getenv('DB_COMEDOR_SERVER')) ?>" readonly>
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label fw-bold">Base de Datos</label>
-                                            <input type="text" class="form-control" value="<?= htmlspecialchars(getenv('DB_COMEDOR_DATABASE')) ?>" readonly>
-                                        </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold text-muted small">Servidor</label>
+                                        <input type="text" class="form-control" value="<?php echo htmlspecialchars(getenv('DB_COMEDOR_SERVER')); ?>" readonly>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold text-muted small">Base de Datos</label>
+                                        <input type="text" class="form-control" value="<?php echo htmlspecialchars(getenv('DB_COMEDOR_DATABASE')); ?>" readonly>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold text-muted small">Usuario BD</label>
+                                        <input type="text" class="form-control" value="<?php echo htmlspecialchars(getenv('DB_COMEDOR_USERNAME')); ?>" readonly>
+                                    </div>
+                                    <div class="alert alert-success">
+                                        <i class="fas fa-check-circle me-2"></i>Estado: <strong>Conectado</strong>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                     
-                    <div class="row mt-3">
+                    <div class="row mt-4">
                         <div class="col-12">
-                            <div class="alert alert-info">
+                            <div class="alert alert-info border-0">
                                 <i class="fas fa-info-circle me-2"></i>
-                                <strong>Información del Sistema:</strong> Dashboard Chef Premium v1.4 - Sistema Completo - Todos los derechos reservados
+                                <strong>Dashboard Chef Premium - VERSIÓN ACTUALIZADA</strong> | 
+                                <span class="badge" style="background: <?php echo $colorTurno; ?>; color: black;">
+                                    <i class="fas <?php echo date('H') < 12 ? 'fa-sun' : 'fa-utensils'; ?> me-1"></i>
+                                    MODO <?php echo $turnoActual; ?>
+                                </span>
+                                | Badges de estado corregidos - AHORA MUESTRA "AGENDADO"
                             </div>
                         </div>
                     </div>
@@ -2358,131 +2736,211 @@ if (isset($_GET['action'])) {
             <?php endif; ?>
         </div>
         
-        <!-- Botón flotante para actualizar -->
-        <div class="position-fixed bottom-3 end-3">
-            <button class="btn-premium rounded-circle p-3" onclick="cargarPaginaActual()" style="width: 60px; height: 60px;">
-                <i class="fas fa-sync-alt"></i>
-            </button>
-        </div>
+        <!-- Botón flotante actualizar -->
+        <button class="floating-btn" onclick="cargarPaginaActual()">
+            <i class="fas fa-sync-alt"></i>
+        </button>
     <?php endif; ?>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <!-- Flatpickr JS -->
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/es.js"></script>
     <script>
         <?php if (isset($_SESSION['usuario']) && $_SESSION['usuario']['logueado']): ?>
         
-        // Variables globales
+        // ============ VARIABLES GLOBALES ============
         let comidasData = [];
         let complementosData = [];
         let cancelacionesData = [];
         let registrosData = [];
-        let empleadosData = <?php echo json_encode(getEmpleados()); ?>;
+        let empleadosData = <?php echo json_encode($empleados); ?>;
         let filtroActual = 'todas';
         let filtroComplementosActual = 'todas';
         let filtroRegistrosActual = 'todas';
         let currentComida = null;
         let currentComplemento = null;
-        let currentCancelacion = null;
-        
-        // Mapeo de nombres para registros
+        let bloqueActualData = <?php echo json_encode($bloqueActual); ?>;
         const nombresCompletos = <?php echo json_encode($nombresCompletos); ?>;
         
-        // Inicializar
+        // Datos de personal por bloque
+        const personalBloque1 = <?php echo json_encode($personalBloque1); ?>;
+        const personalBloque2 = <?php echo json_encode($personalBloque2); ?>;
+        const personalBloque3 = <?php echo json_encode($personalBloque3); ?>;
+        const personalBloque4 = <?php echo json_encode($personalBloque4); ?>;
+        const mapaPedidos = <?php echo json_encode($mapaPedidos); ?>;
+        
+        // ============ INICIALIZACIÓN ============
         document.addEventListener('DOMContentLoaded', function() {
-            // Configurar eventos
+            // Eventos comidas
             document.getElementById('confirmAtender')?.addEventListener('click', ejecutarAtencion);
-            document.getElementById('confirmAtenderComplemento')?.addEventListener('click', ejecutarAtencionComplemento);
-            document.getElementById('confirmAsignar')?.addEventListener('click', ejecutarAsignacion);
             
-            // Configurar formulario de registro
+            // Eventos complementos
+            document.getElementById('confirmAtenderComplemento')?.addEventListener('click', ejecutarAtencionComplemento);
+            
+            // Eventos registros
             document.getElementById('formCrearRegistro')?.addEventListener('submit', crearRegistroComida);
             
-            // Inicializar datepicker y timepicker si existen
+            // Inicializar Flatpickr
             if (typeof flatpickr !== 'undefined') {
-                // Datepicker para fecha
                 flatpickr('.flatpickr-date', {
                     dateFormat: 'd-m-Y',
                     locale: 'es',
                     defaultDate: 'today',
-                    maxDate: 'today',
-                    onChange: function(selectedDates, dateStr) {
-                        console.log('Fecha seleccionada:', dateStr);
-                    }
+                    maxDate: 'today'
                 });
                 
-                // Timepicker para hora
                 flatpickr('.flatpickr-time', {
                     enableTime: true,
                     noCalendar: true,
                     dateFormat: 'H:i:S',
                     time_24hr: true,
-                    defaultDate: '<?php echo date("H:i:s"); ?>',
-                    onChange: function(selectedDates, dateStr) {
-                        console.log('Hora seleccionada:', dateStr);
-                    }
+                    defaultDate: '<?php echo date("H:i:s"); ?>'
                 });
             }
             
-            // Cargar datos según la página
+            // Iniciar según página
             if ('<?php echo $pagina_actual; ?>' === 'comidas') {
+                iniciarReloj();
+                setInterval(actualizarBloqueActual, 60000);
                 cargarDashboard();
                 setInterval(cargarDashboard, 30000);
-            } else if ('<?php echo $pagina_actual; ?>' === 'complementos') {
+            }
+            
+            if ('<?php echo $pagina_actual; ?>' === 'complementos') {
                 cargarComplementosDashboard();
                 setInterval(cargarComplementosDashboard, 30000);
-            } else if ('<?php echo $pagina_actual; ?>' === 'registros') {
+            }
+            
+            if ('<?php echo $pagina_actual; ?>' === 'registros') {
                 cargarRegistrosDashboard();
                 setInterval(cargarRegistrosDashboard, 30000);
-            } else if ('<?php echo $pagina_actual; ?>' === 'asignar') {
+            }
+            
+            if ('<?php echo $pagina_actual; ?>' === 'asignar') {
                 cargarCancelaciones();
                 setInterval(cargarCancelaciones, 30000);
             }
         });
         
-        // Toggle sidebar en móviles
+        // ============ FUNCIONES COMUNES ============
         function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            sidebar.classList.toggle('show');
+            document.getElementById('sidebar')?.classList.toggle('show');
         }
         
-        // Cargar página actual
         function cargarPaginaActual() {
-            if ('<?php echo $pagina_actual; ?>' === 'comidas') {
-                cargarDashboard();
-            } else if ('<?php echo $pagina_actual; ?>' === 'complementos') {
-                cargarComplementosDashboard();
-            } else if ('<?php echo $pagina_actual; ?>' === 'registros') {
-                cargarRegistrosDashboard();
-            } else if ('<?php echo $pagina_actual; ?>' === 'asignar') {
-                cargarCancelaciones();
+            if ('<?php echo $pagina_actual; ?>' === 'comidas') cargarDashboard();
+            else if ('<?php echo $pagina_actual; ?>' === 'complementos') cargarComplementosDashboard();
+            else if ('<?php echo $pagina_actual; ?>' === 'registros') cargarRegistrosDashboard();
+            else if ('<?php echo $pagina_actual; ?>' === 'asignar') cargarCancelaciones();
+        }
+        
+        function mostrarError(mensaje) {
+            Swal.fire({ 
+                icon: 'error', 
+                title: 'Error', 
+                text: mensaje, 
+                confirmButtonColor: '#dc3545',
+                confirmButtonText: 'Entendido'
+            });
+        }
+        
+        function mostrarAlerta(titulo, mensaje, tipo = 'success') {
+            Swal.fire({ 
+                icon: tipo, 
+                title: titulo, 
+                text: mensaje, 
+                timer: 2000, 
+                showConfirmButton: false,
+                position: 'top-end',
+                toast: true
+            });
+        }
+        
+        // ============ FUNCIONES MÓDULO COMIDAS ============
+        function iniciarReloj() {
+            function actualizarReloj() {
+                const reloj = document.getElementById('relojDigital');
+                if (reloj) {
+                    reloj.textContent = new Date().toLocaleTimeString('es-MX', { hour12: false });
+                }
+            }
+            actualizarReloj();
+            setInterval(actualizarReloj, 1000);
+        }
+        
+        function mostrarBloque(bloque) {
+            document.getElementById('personal-bloque1').style.display = 'none';
+            document.getElementById('personal-bloque2').style.display = 'none';
+            document.getElementById('personal-bloque3').style.display = 'none';
+            document.getElementById('personal-bloque4').style.display = 'none';
+            document.getElementById('personal-' + bloque).style.display = 'block';
+            
+            document.querySelectorAll('.bloque-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.getElementById('tab-' + bloque).classList.add('active');
+        }
+        
+        async function actualizarBloqueActual() {
+            try {
+                const response = await fetch('?action=get_bloque_actual');
+                const data = await response.json();
+                if (data.success) {
+                    bloqueActualData = data.bloque;
+                    actualizarVistaBloque();
+                }
+            } catch (error) {
+                console.error('Error:', error);
             }
         }
         
-        // ============ MÓDULO: COMIDAS A SERVIR ============
+        function actualizarVistaBloque() {
+            const contenedor = document.getElementById('contenedorBloqueActual');
+            if (!contenedor) return;
+            
+            let html = '';
+            if (bloqueActualData.activo) {
+                html = `
+                    <div class="bloque-activo">
+                        <span class="badge bg-warning text-dark mb-2"><i class="fas fa-bell me-1"></i>ACTIVO AHORA</span>
+                        <h5 class="text-white mb-1">${bloqueActualData.nombre}</h5>
+                        <p class="text-white-50 mb-0 small"><i class="fas fa-clock me-1"></i>${bloqueActualData.inicio} - ${bloqueActualData.fin}</p>
+                    </div>
+                `;
+            } else if (bloqueActualData.mensaje?.includes('Próximo')) {
+                html = `
+                    <div class="bg-white-10 p-4 rounded" style="background: rgba(255,255,255,0.1);">
+                        <span class="badge bg-secondary mb-2"><i class="fas fa-hourglass-half me-1"></i>PRÓXIMO</span>
+                        <h5 class="text-white mb-1">${bloqueActualData.mensaje}</h5>
+                        <p class="text-white-50 mb-0 small"><i class="fas fa-clock me-1"></i>${bloqueActualData.inicio || '--:--'} - ${bloqueActualData.fin || '--:--'}</p>
+                    </div>
+                `;
+            } else {
+                html = `
+                    <div class="bg-white-10 p-4 rounded" style="background: rgba(255,255,255,0.1);">
+                        <span class="badge bg-secondary mb-2"><i class="fas fa-moon me-1"></i>DESCANSO</span>
+                        <h5 class="text-white mb-0">${bloqueActualData.mensaje || 'No hay turno'}</h5>
+                    </div>
+                `;
+            }
+            contenedor.innerHTML = html;
+        }
         
-        // Cargar dashboard completo
         async function cargarDashboard() {
             try {
                 await Promise.all([cargarEstadisticas(), cargarComidas()]);
-                
                 const boton = document.querySelector('.btn-premium i.fa-sync-alt');
                 if (boton) {
                     boton.classList.add('fa-spin');
-                    setTimeout(() => {
-                        boton.classList.remove('fa-spin');
-                    }, 1000);
+                    setTimeout(() => boton.classList.remove('fa-spin'), 1000);
                 }
-                
             } catch (error) {
                 console.error('Error:', error);
                 mostrarError('Error al cargar datos');
             }
         }
         
-        // Cargar estadísticas
         async function cargarEstadisticas() {
             try {
                 const response = await fetch('?action=get_estadisticas');
@@ -2490,16 +2948,43 @@ if (isset($_GET['action'])) {
                 
                 if (data.success) {
                     const stats = data.estadisticas;
-                    document.getElementById('total-comidas').textContent = stats.total || 0;
-                    document.getElementById('comidas-atendidas').textContent = stats.atendidos || 0;
-                    document.getElementById('comidas-pendientes').textContent = stats.pendientes || 0;
+                    const pendientes = stats.pendientes || 0;
+                    const atendidos = stats.atendidos || 0;
+                    const total = stats.total || 0;
+                    const porcentaje = total > 0 ? Math.round((atendidos / total) * 100) : 0;
+                    
+                    document.getElementById('comidas-pendientes').textContent = pendientes;
+                    document.getElementById('comidas-atendidas').textContent = atendidos;
+                    
+                    const badge = document.getElementById('notification-count');
+                    if (badge) {
+                        badge.textContent = pendientes;
+                        badge.style.display = pendientes > 0 ? 'inline-block' : 'none';
+                    }
+                    
+                    const sidebarBadge = document.getElementById('sidebar-comidas-count');
+                    if (sidebarBadge) {
+                        sidebarBadge.textContent = pendientes;
+                        sidebarBadge.style.display = pendientes > 0 ? 'inline-block' : 'none';
+                    }
+                    
+                    const pendientesHorario = document.getElementById('pendientes-horario');
+                    if (pendientesHorario) {
+                        pendientesHorario.innerHTML = bloqueActualData?.activo 
+                            ? `<i class="fas fa-bell me-1"></i>Bloque: ${pendientes}`
+                            : `<i class="fas fa-hourglass me-1"></i>Fuera: ${pendientes}`;
+                    }
+                    
+                    const porcentajeElem = document.getElementById('atendidas-porcentaje');
+                    if (porcentajeElem) {
+                        porcentajeElem.innerHTML = `<i class="fas fa-chart-line me-1"></i>${porcentaje}%`;
+                    }
                 }
             } catch (error) {
                 console.error('Error cargando estadísticas:', error);
             }
         }
         
-        // Cargar comidas
         async function cargarComidas() {
             try {
                 const response = await fetch('?action=get_comidas');
@@ -2508,13 +2993,7 @@ if (isset($_GET['action'])) {
                 if (data.success) {
                     comidasData = data.comidas;
                     actualizarVistaComidas();
-                    
-                    const pendientes = comidasData.filter(c => !c.Estatus || c.Estatus === 'PENDIENTE').length;
-                    const badge = document.getElementById('notification-count');
-                    if (badge) {
-                        badge.textContent = pendientes;
-                        badge.style.display = pendientes > 0 ? 'inline-block' : 'none';
-                    }
+                    actualizarPersonalConEstados();
                 }
             } catch (error) {
                 console.error('Error cargando comidas:', error);
@@ -2522,47 +3001,126 @@ if (isset($_GET['action'])) {
             }
         }
         
-        // Filtrar comidas
+        // ============ FUNCIÓN PRINCIPAL CORREGIDA - AHORA MUESTRA "AGENDADO" ============
+        function actualizarPersonalConEstados() {
+            const horaActual = new Date().getHours();
+            const esManana = horaActual < 12;
+            const turnoActual = esManana ? 'DESAYUNO' : 'COMIDA';
+            
+            function renderPersonalItem(persona, index) {
+                const nombre = persona.nombre;
+                const depto = persona.depto;
+                const numero = String(index + 1).padStart(2, '0');
+                const nombreNormalizado = nombre.trim().toUpperCase();
+                
+                // Verificar si tiene el turno actual agendado en mapaPedidos
+                let tieneTurno = false;
+                if (mapaPedidos[nombreNormalizado]) {
+                    for (const pedido of mapaPedidos[nombreNormalizado]) {
+                        if (pedido.consumo === turnoActual) {
+                            tieneTurno = true;
+                            break;
+                        }
+                    }
+                }
+                
+                // Verificar si ya fue atendido o está en fila
+                let yaAtendido = false;
+                let enFila = false;
+                
+                for (const comida of comidasData) {
+                    // Comparación flexible de nombres
+                    if (comida.Nombre) {
+                        const nombreComida = comida.Nombre.toUpperCase().trim();
+                        if (nombreComida.includes(nombreNormalizado) || nombreNormalizado.includes(nombreComida)) {
+                            if (comida.Estatus === 'ATENDIDO') {
+                                yaAtendido = true;
+                                break;
+                            } else if (!comida.Estatus || comida.Estatus === 'PENDIENTE') {
+                                enFila = true;
+                                // No break aquí porque podría haber otro registro atendido
+                            }
+                        }
+                    }
+                }
+                
+                // Construir badge según estado (orden de prioridad)
+                let badgeHtml = '';
+                if (yaAtendido) {
+                    badgeHtml = '<span class="badge-atendido"><i class="fas fa-check-circle me-1"></i>ATENDIDO</span>';
+                } else if (enFila) {
+                    badgeHtml = '<span class="badge-pendiente"><i class="fas fa-clock me-1"></i>EN FILA</span>';
+                } else if (tieneTurno) {
+                    // Color dinámico según el turno
+                    const bgColor = esManana ? 'rgba(255, 193, 7, 0.15)' : 'rgba(33, 150, 243, 0.15)';
+                    const textColor = esManana ? '#856404' : '#0c5460';
+                    const borderColor = esManana ? '#ffeeba' : '#bee5eb';
+                    const iconoTurno = esManana ? 'fa-sun' : 'fa-utensils';
+                    
+                    badgeHtml = `<span class="badge-consumo" style="background: ${bgColor}; color: ${textColor}; border: 1px solid ${borderColor};">
+                        <i class="fas ${iconoTurno} me-1"></i>${turnoActual} AGENDADO
+                    </span>`;
+                } else {
+                    badgeHtml = '<span class="badge-sinregistro"><i class="fas fa-hourglass me-1"></i>SIN REGISTRO</span>';
+                }
+                
+                return `
+                    <div class="personal-item">
+                        <span class="personal-numero">#${numero}</span>
+                        <span class="personal-nombre" title="${nombre}">${nombre}</span>
+                        <span class="personal-depto" title="${depto}">${depto}</span>
+                        ${badgeHtml}
+                    </div>
+                `;
+            }
+            
+            // Renderizar cada bloque
+            const grid1 = document.getElementById('grid-bloque1');
+            if (grid1) {
+                grid1.innerHTML = personalBloque1.map((p, i) => renderPersonalItem(p, i)).join('');
+            }
+            
+            const grid2 = document.getElementById('grid-bloque2');
+            if (grid2) {
+                grid2.innerHTML = personalBloque2.map((p, i) => renderPersonalItem(p, i)).join('');
+            }
+            
+            const grid3 = document.getElementById('grid-bloque3');
+            if (grid3) {
+                grid3.innerHTML = personalBloque3.map((p, i) => renderPersonalItem(p, i)).join('');
+            }
+            
+            const grid4 = document.getElementById('grid-bloque4');
+            if (grid4) {
+                grid4.innerHTML = personalBloque4.map((p, i) => renderPersonalItem(p, i)).join('');
+            }
+        }
+        
         function filtrarComidas(tipo) {
             filtroActual = tipo;
-            
-            // Actualizar botones activos
-            document.querySelectorAll('.btn-outline-primary').forEach(btn => {
-                btn.classList.remove('active');
-            });
+            document.querySelectorAll('.btn-outline-primary').forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
-            
             actualizarVistaComidas();
         }
         
-        // Actualizar vista de comidas
         function actualizarVistaComidas() {
             const container = document.getElementById('vista-comidas');
             if (!container) return;
             
-            let comidasFiltradas = comidasData;
+            let filtradas = comidasData;
+            if (filtroActual === 'pendientes') filtradas = comidasData.filter(c => !c.Estatus || c.Estatus === 'PENDIENTE');
+            if (filtroActual === 'atendidas') filtradas = comidasData.filter(c => c.Estatus === 'ATENDIDO');
             
-            if (filtroActual === 'pendientes') {
-                comidasFiltradas = comidasData.filter(c => !c.Estatus || c.Estatus === 'PENDIENTE');
-            } else if (filtroActual === 'atendidas') {
-                comidasFiltradas = comidasData.filter(c => c.Estatus === 'ATENDIDO');
-            }
-            
-            if (comidasFiltradas.length === 0) {
-                let mensaje = '';
-                if (filtroActual === 'todas') {
-                    mensaje = 'No hay comidas registradas hoy';
-                } else if (filtroActual === 'pendientes') {
-                    mensaje = '¡Todo atendido! No hay comidas pendientes';
-                } else {
-                    mensaje = 'No hay comidas atendidas aún';
-                }
+            if (filtradas.length === 0) {
+                let mensaje = filtroActual === 'todas' ? 'No hay comidas registradas hoy' : 
+                             filtroActual === 'pendientes' ? '¡Todo atendido! No hay comidas pendientes' : 
+                             'No hay comidas atendidas aún';
                 
                 container.innerHTML = `
-                    <div class="col-12 empty-state">
-                        <i class="fas fa-inbox"></i>
-                        <h4 class="text-muted mt-3">${mensaje}</h4>
-                        <button class="btn btn-primary mt-3" onclick="cargarDashboard()">
+                    <div class="empty-state">
+                        <i class="fas fa-utensils"></i>
+                        <p class="text-muted mt-2">${mensaje}</p>
+                        <button class="btn btn-primary btn-sm mt-2" onclick="cargarDashboard()">
                             <i class="fas fa-sync-alt me-2"></i>Actualizar
                         </button>
                     </div>
@@ -2570,150 +3128,82 @@ if (isset($_GET['action'])) {
                 return;
             }
             
-            container.innerHTML = comidasFiltradas.map((comida, index) => {
-                const nombre = comida.Nombre || 'Sin nombre';
-                const horaCorta = comida.Hora_Corta || '--:--';
-                const area = comida.Area || 'Sin área';
-                const fechaHora = comida.Fecha_Hora || '--:--:--';
-                const estatus = comida.Estatus_Actual;
-                const esAtendida = estatus === 'ATENDIDO';
-                const horaAtendido = comida.Fecha_Atendido_Formateada || '';
-                
-                return `
-                <div class="col-md-6 col-lg-4 mb-4">
-                    <div class="comida-card fade-in ${esAtendida ? 'atendida' : ''}">
-                        <div class="d-flex justify-content-between align-items-start mb-3">
-                            <div>
-                                <span class="badge bg-primary">#${index + 1}</span>
-                            </div>
-                            <div>
-                                <span class="badge ${esAtendida ? 'bg-success' : 'bg-warning'}">
-                                    <i class="fas ${esAtendida ? 'fa-check-circle' : 'fa-clock'} me-1"></i>
-                                    ${esAtendida ? 'ATENDIDA' : 'PENDIENTE'}
-                                </span>
-                            </div>
-                        </div>
-                        
-                        <h5 class="fw-bold mb-2" style="color: var(--primary-dark);">
-                            <i class="fas fa-user me-2"></i>${nombre}
-                        </h5>
-                        
-                        <div class="mb-3">
-                            <span class="area-badge">
-                                <i class="fas fa-building me-1"></i>${area}
-                            </span>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <div>
-                                <small class="text-muted">
-                                    <i class="fas fa-clock me-1"></i>Hora registro: ${horaCorta}
-                                </small>
-                            </div>
-                            <div class="mt-1">
-                                <small class="text-muted">
-                                    <i class="fas fa-utensils me-1"></i>Hora comida: ${fechaHora}
-                                </small>
-                            </div>
-                            ${esAtendida && horaAtendido ? `
-                            <div class="mt-1">
-                                <small class="text-success">
-                                    <i class="fas fa-user-check me-1"></i>Atendido: ${horaAtendido}
-                                </small>
-                            </div>
-                            ` : ''}
-                        </div>
-                        
-                        ${!esAtendida ? `
-                        <button class="btn-premium w-100" onclick="mostrarConfirmacionAtender('${comida.Id_Unico}')">
-                            <i class="fas fa-check-circle me-2"></i>ATENDER COMIDA
-                        </button>
-                        ` : `
-                        <button class="btn-premium w-100" disabled style="background: #6c757d;">
-                            <i class="fas fa-check-circle me-2"></i>YA ATENDIDA
-                        </button>
-                        `}
+            container.innerHTML = filtradas.map((c, i) => `
+                <div class="comida-card ${c.Estatus === 'ATENDIDO' ? 'atendida' : ''}">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <span class="badge bg-primary">#${i + 1}</span>
+                        <span class="badge ${c.Estatus === 'ATENDIDO' ? 'bg-success' : 'bg-warning'}">
+                            ${c.Estatus === 'ATENDIDO' ? 'ATENDIDA' : 'PENDIENTE'}
+                        </span>
                     </div>
+                    <h6 class="fw-bold mb-2">${c.Nombre?.substring(0, 35) || 'Sin nombre'}${c.Nombre?.length > 35 ? '...' : ''}</h6>
+                    <div class="small text-muted mb-3">
+                        <span class="area-badge">${c.Area || 'Sin área'}</span>
+                        <span class="ms-2"><i class="fas fa-clock me-1"></i>${c.Hora_Corta || '--:--'}</span>
+                    </div>
+                    ${c.Estatus !== 'ATENDIDO' ? 
+                        `<button class="btn-premium w-100" onclick="mostrarConfirmacionAtender('${c.Id_Unico}')">
+                            <i class="fas fa-check-circle me-1"></i>ATENDER
+                        </button>` : 
+                        `<button class="btn btn-secondary w-100" disabled>ATENDIDA</button>`
+                    }
                 </div>
-                `;
-            }).join('');
+            `).join('');
         }
         
-        // Mostrar confirmación para atender
-        function mostrarConfirmacionAtender(idUnico) {
-            // Buscar la comida por ID único en todos los datos
-            currentComida = comidasData.find(c => c.Id_Unico === idUnico);
-            
-            if (!currentComida) {
-                mostrarError('No se encontró la comida seleccionada');
-                return;
+        function mostrarConfirmacionAtender(id) {
+            currentComida = comidasData.find(c => c.Id_Unico === id);
+            if (currentComida) {
+                document.getElementById('modal-empleado').textContent = currentComida.Nombre?.substring(0, 40) || 'Empleado';
+                new bootstrap.Modal(document.getElementById('confirmModal')).show();
             }
-            
-            document.getElementById('modal-empleado').textContent = currentComida.Nombre;
-            
-            const modal = new bootstrap.Modal(document.getElementById('confirmModal'));
-            modal.show();
         }
         
-        // Ejecutar atención
         async function ejecutarAtencion() {
             const modal = bootstrap.Modal.getInstance(document.getElementById('confirmModal'));
-            
             try {
                 const formData = new FormData();
                 formData.append('nombre', currentComida.Nombre);
                 formData.append('hora_entrada', currentComida.Hora_Entrada_SQL);
                 formData.append('fecha_hora', currentComida.Fecha_Hora);
                 
-                const response = await fetch('?action=marcar_atendido', {
-                    method: 'POST',
-                    body: formData
-                });
-                
+                const response = await fetch('?action=marcar_atendido', { method: 'POST', body: formData });
                 const data = await response.json();
                 
                 modal.hide();
                 
                 if (data.success) {
-                    mostrarAlerta('¡Éxito!', data.message, 'success');
+                    mostrarAlerta('Éxito', data.message, 'success');
                     await cargarDashboard();
+                    await actualizarBloqueActual();
                 } else {
                     mostrarError('Error al atender comida: ' + data.message);
                 }
             } catch (error) {
                 modal.hide();
-                console.error("Error:", error);
                 mostrarError('Error al atender comida');
             }
         }
         
-        // ============ MÓDULO: COMPLEMENTOS ============
-        
-        // Cargar dashboard de complementos
+        // ============ FUNCIONES MÓDULO COMPLEMENTOS ============
         async function cargarComplementosDashboard() {
             try {
                 await Promise.all([cargarEstadisticasComplementos(), cargarComplementos()]);
-                
                 const boton = document.querySelector('.btn-complement i.fa-sync-alt');
                 if (boton) {
                     boton.classList.add('fa-spin');
-                    setTimeout(() => {
-                        boton.classList.remove('fa-spin');
-                    }, 1000);
+                    setTimeout(() => boton.classList.remove('fa-spin'), 1000);
                 }
-                
             } catch (error) {
                 console.error('Error:', error);
-                mostrarError('Error al cargar datos de complementos');
+                mostrarError('Error al cargar complementos');
             }
         }
         
-        // Cargar estadísticas de complementos
         async function cargarEstadisticasComplementos() {
             try {
                 const response = await fetch('?action=get_estadisticas_complementos');
                 const data = await response.json();
-                
                 if (data.success) {
                     const stats = data.estadisticas;
                     document.getElementById('total-complementos').textContent = stats.total || 0;
@@ -2721,11 +3211,10 @@ if (isset($_GET['action'])) {
                     document.getElementById('complementos-pendientes').textContent = stats.pendientes || 0;
                 }
             } catch (error) {
-                console.error('Error cargando estadísticas de complementos:', error);
+                console.error('Error:', error);
             }
         }
         
-        // Cargar complementos
         async function cargarComplementos() {
             try {
                 const response = await fetch('?action=get_complementos');
@@ -2741,6 +3230,12 @@ if (isset($_GET['action'])) {
                         badge.textContent = pendientes;
                         badge.style.display = pendientes > 0 ? 'inline-block' : 'none';
                     }
+                    
+                    const sidebarBadge = document.getElementById('sidebar-complementos-count');
+                    if (sidebarBadge) {
+                        sidebarBadge.textContent = pendientes;
+                        sidebarBadge.style.display = pendientes > 0 ? 'inline-block' : 'none';
+                    }
                 }
             } catch (error) {
                 console.error('Error cargando complementos:', error);
@@ -2748,144 +3243,86 @@ if (isset($_GET['action'])) {
             }
         }
         
-        // Filtrar complementos
         function filtrarComplementos(tipo) {
             filtroComplementosActual = tipo;
-            
-            // Actualizar botones activos
-            document.querySelectorAll('.btn-outline-complement').forEach(btn => {
-                btn.classList.remove('active');
-            });
+            document.querySelectorAll('.btn-outline-primary').forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
-            
             actualizarVistaComplementos();
         }
         
-        // Actualizar vista de complementos
         function actualizarVistaComplementos() {
             const container = document.getElementById('vista-complementos');
             if (!container) return;
             
-            let complementosFiltrados = complementosData;
+            let filtradas = complementosData;
+            if (filtroComplementosActual === 'pendientes') filtradas = complementosData.filter(c => c.estatus === 'PENDIENTE');
+            if (filtroComplementosActual === 'atendidas') filtradas = complementosData.filter(c => c.estatus === 'ATENDIDO');
             
-            if (filtroComplementosActual === 'pendientes') {
-                complementosFiltrados = complementosData.filter(c => c.estatus === 'PENDIENTE');
-            } else if (filtroComplementosActual === 'atendidas') {
-                complementosFiltrados = complementosData.filter(c => c.estatus === 'ATENDIDO');
-            }
-            
-            if (complementosFiltrados.length === 0) {
-                let mensaje = '';
-                if (filtroComplementosActual === 'todas') {
-                    mensaje = 'No hay complementos registrados hoy';
-                } else if (filtroComplementosActual === 'pendientes') {
-                    mensaje = '¡Todo atendido! No hay complementos pendientes';
-                } else {
-                    mensaje = 'No hay complementos atendidos aún';
-                }
+            if (filtradas.length === 0) {
+                let mensaje = filtroComplementosActual === 'todas' ? 'No hay complementos registrados hoy' :
+                             filtroComplementosActual === 'pendientes' ? '¡Todo atendido! No hay complementos pendientes' :
+                             'No hay complementos atendidos aún';
                 
                 container.innerHTML = `
-                    <div class="col-12 empty-state">
-                        <i class="fas fa-inbox"></i>
-                        <h4 class="text-muted mt-3">${mensaje}</h4>
-                        <button class="btn btn-complement mt-3" onclick="cargarComplementosDashboard()">
-                            <i class="fas fa-sync-alt me-2"></i>Actualizar
-                        </button>
+                    <div class="col-12">
+                        <div class="empty-state">
+                            <i class="fas fa-mug-hot"></i>
+                            <h4 class="text-muted mt-3">${mensaje}</h4>
+                            <button class="btn btn-primary mt-3" onclick="cargarComplementosDashboard()">
+                                <i class="fas fa-sync-alt me-2"></i>Actualizar
+                            </button>
+                        </div>
                     </div>
                 `;
                 return;
             }
             
-            container.innerHTML = complementosFiltrados.map((complemento, index) => {
-                const nombre = complemento.nombre || 'Sin nombre';
-                const complementoTipo = complemento.complemento || 'Sin especificar';
-                const fecha = complemento.fecha_formateada || '--/--/----';
-                const hora = complemento.hora_corta || '--:--';
-                const estatus = complemento.estatus;
-                const esAtendido = estatus === 'ATENDIDO';
-                const horaAtendido = complemento.fecha_atendido_formateada || '';
-                
-                return `
-                <div class="col-md-6 col-lg-4 mb-4">
+            let html = '';
+            filtradas.forEach((comp, index) => {
+                const esAtendido = comp.estatus === 'ATENDIDO';
+                html += `<div class="col-md-6 col-lg-4">
                     <div class="complemento-card fade-in ${esAtendido ? 'atendida' : ''}">
                         <div class="d-flex justify-content-between align-items-start mb-3">
-                            <div>
-                                <span class="badge bg-primary">#${index + 1}</span>
-                            </div>
-                            <div>
-                                <span class="badge ${esAtendido ? 'bg-success' : 'bg-warning'}">
-                                    <i class="fas ${esAtendido ? 'fa-check-circle' : 'fa-clock'} me-1"></i>
-                                    ${esAtendido ? 'ATENDIDO' : 'PENDIENTE'}
-                                </span>
-                            </div>
-                        </div>
-                        
-                        <h5 class="fw-bold mb-2" style="color: var(--primary-dark);">
-                            <i class="fas fa-user me-2"></i>${nombre}
-                        </h5>
-                        
-                        <div class="mb-3">
-                            <span class="complemento-badge">
-                                <i class="fas fa-mug-hot me-1"></i>${complementoTipo}
+                            <span class="badge bg-primary">#${index + 1}</span>
+                            <span class="badge ${esAtendido ? 'bg-success' : 'bg-warning'}">
+                                <i class="fas ${esAtendido ? 'fa-check-circle' : 'fa-clock'} me-1"></i>${comp.estatus}
                             </span>
                         </div>
-                        
+                        <h5 class="fw-bold mb-2">${comp.nombre || 'Sin nombre'}</h5>
                         <div class="mb-3">
-                            <div>
-                                <small class="text-muted">
-                                    <i class="fas fa-calendar me-1"></i>Fecha: ${fecha}
-                                </small>
-                            </div>
-                            <div class="mt-1">
-                                <small class="text-muted">
-                                    <i class="fas fa-clock me-1"></i>Hora: ${hora}
-                                </small>
-                            </div>
-                            ${esAtendido && horaAtendido ? `
-                            <div class="mt-1">
-                                <small class="text-success">
-                                    <i class="fas fa-user-check me-1"></i>Atendido: ${horaAtendido}
-                                </small>
-                            </div>
-                            ` : ''}
+                            <span class="badge bg-info text-white">
+                                <i class="fas fa-mug-hot me-1"></i>${comp.complemento || 'Sin especificar'}
+                            </span>
                         </div>
-                        
-                        ${!esAtendido ? `
-                        <button class="btn-complement w-100" onclick="mostrarConfirmacionAtenderComplemento('${complemento.Id_Unico}')">
-                            <i class="fas fa-check-circle me-2"></i>ATENDER COMPLEMENTO
-                        </button>
-                        ` : `
-                        <button class="btn-complement w-100" disabled style="background: #6c757d;">
-                            <i class="fas fa-check-circle me-2"></i>YA ATENDIDO
-                        </button>
-                        `}
+                        <div class="mb-3 small">
+                            <div><i class="fas fa-calendar me-1 text-muted"></i>Fecha: ${comp.fecha_formateada || '--/--/----'}</div>
+                            <div><i class="fas fa-clock me-1 text-muted"></i>Hora: ${comp.hora_corta || '--:--'}</div>
+                            ${esAtendido && comp.fecha_atendido_formateada ? 
+                                `<div class="text-success"><i class="fas fa-user-check me-1"></i>Atendido: ${comp.fecha_atendido_formateada}</div>` : ''}
+                        </div>
+                        ${!esAtendido ? 
+                            `<button class="btn-complement w-100" onclick="mostrarConfirmacionAtenderComplemento('${comp.Id_Unico}')">
+                                <i class="fas fa-check-circle me-2"></i>ATENDER
+                            </button>` : 
+                            `<button class="btn btn-secondary w-100" disabled>YA ATENDIDO</button>`
+                        }
                     </div>
-                </div>
-                `;
-            }).join('');
+                </div>`;
+            });
+            container.innerHTML = html;
         }
         
-        // Mostrar confirmación para atender complemento
-        function mostrarConfirmacionAtenderComplemento(idUnico) {
-            // Buscar el complemento por ID único en todos los datos
-            currentComplemento = complementosData.find(c => c.Id_Unico === idUnico);
-            
-            if (!currentComplemento) {
-                mostrarError('No se encontró el complemento seleccionado');
-                return;
+        function mostrarConfirmacionAtenderComplemento(id) {
+            currentComplemento = complementosData.find(c => c.Id_Unico === id);
+            if (currentComplemento) {
+                document.getElementById('modal-empleado-complemento').textContent = currentComplemento.nombre;
+                document.getElementById('modal-complemento').textContent = currentComplemento.complemento;
+                new bootstrap.Modal(document.getElementById('confirmModalComplemento')).show();
             }
-            
-            document.getElementById('modal-empleado-complemento').textContent = currentComplemento.nombre;
-            document.getElementById('modal-complemento').textContent = currentComplemento.complemento;
-            
-            const modal = new bootstrap.Modal(document.getElementById('confirmModalComplemento'));
-            modal.show();
         }
         
-        // Ejecutar atención de complemento
         async function ejecutarAtencionComplemento() {
             const modal = bootstrap.Modal.getInstance(document.getElementById('confirmModalComplemento'));
-            
             try {
                 const formData = new FormData();
                 formData.append('nombre', currentComplemento.nombre);
@@ -2893,44 +3330,33 @@ if (isset($_GET['action'])) {
                 formData.append('fecha', currentComplemento.fecha_formateada);
                 formData.append('hora', currentComplemento.hora_completa);
                 
-                const response = await fetch('?action=marcar_complemento_atendido', {
-                    method: 'POST',
-                    body: formData
-                });
-                
+                const response = await fetch('?action=marcar_complemento_atendido', { method: 'POST', body: formData });
                 const data = await response.json();
                 
                 modal.hide();
                 
                 if (data.success) {
-                    mostrarAlerta('¡Éxito!', data.message, 'success');
+                    mostrarAlerta('Éxito', data.message, 'success');
                     await cargarComplementosDashboard();
                 } else {
                     mostrarError('Error al atender complemento: ' + data.message);
                 }
             } catch (error) {
                 modal.hide();
-                console.error("Error:", error);
                 mostrarError('Error al atender complemento');
             }
         }
         
-        // ============ MÓDULO: REGISTROS DE COMIDA ============
-        
-        // Cargar dashboard de registros
+        // ============ FUNCIONES MÓDULO REGISTROS ============
         async function cargarRegistrosDashboard() {
             try {
                 await cargarRegistros();
-                
                 const boton = document.querySelector('.btn-premium i.fa-sync-alt');
                 if (boton) {
                     boton.classList.add('fa-spin');
-                    setTimeout(() => {
-                        boton.classList.remove('fa-spin');
-                    }, 1000);
+                    setTimeout(() => boton.classList.remove('fa-spin'), 1000);
                 }
                 
-                // Actualizar estadísticas
                 const total = registrosData.length;
                 const atendidos = registrosData.filter(r => r.Estatus === 'ATENDIDO').length;
                 const pendientes = total - atendidos;
@@ -2945,167 +3371,106 @@ if (isset($_GET['action'])) {
                     badge.style.display = pendientes > 0 ? 'inline-block' : 'none';
                 }
                 
+                const sidebarBadge = document.getElementById('sidebar-registros-count');
+                if (sidebarBadge) {
+                    sidebarBadge.textContent = pendientes;
+                    sidebarBadge.style.display = pendientes > 0 ? 'inline-block' : 'none';
+                }
             } catch (error) {
                 console.error('Error:', error);
-                mostrarError('Error al cargar datos de registros');
+                mostrarError('Error al cargar registros');
             }
         }
         
-        // Cargar registros
         async function cargarRegistros() {
             try {
                 const response = await fetch('?action=get_registros_hoy');
                 const data = await response.json();
-                
                 if (data.success) {
                     registrosData = data.registros;
                     actualizarVistaRegistros();
                 }
             } catch (error) {
                 console.error('Error cargando registros:', error);
-                mostrarError('Error al cargar registros');
             }
         }
         
-        // Filtrar registros
         function filtrarRegistros(tipo) {
             filtroRegistrosActual = tipo;
-            
-            // Actualizar botones activos
-            document.querySelectorAll('.btn-outline-primary').forEach(btn => {
-                btn.classList.remove('active');
-            });
+            document.querySelectorAll('.btn-outline-primary').forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
-            
             actualizarVistaRegistros();
         }
         
-        // Actualizar vista de registros
         function actualizarVistaRegistros() {
             const container = document.getElementById('vista-registros');
             if (!container) return;
             
-            let registrosFiltrados = registrosData;
+            let filtradas = registrosData;
+            if (filtroRegistrosActual === 'pendientes') filtradas = registrosData.filter(r => r.Estatus === 'PENDIENTE');
+            if (filtroRegistrosActual === 'atendidas') filtradas = registrosData.filter(r => r.Estatus === 'ATENDIDO');
             
-            if (filtroRegistrosActual === 'pendientes') {
-                registrosFiltrados = registrosData.filter(r => r.Estatus === 'PENDIENTE');
-            } else if (filtroRegistrosActual === 'atendidas') {
-                registrosFiltrados = registrosData.filter(r => r.Estatus === 'ATENDIDO');
-            }
-            
-            if (registrosFiltrados.length === 0) {
-                let mensaje = '';
-                if (filtroRegistrosActual === 'todas') {
-                    mensaje = 'No hay registros hoy';
-                } else if (filtroRegistrosActual === 'pendientes') {
-                    mensaje = '¡Todo atendido! No hay registros pendientes';
-                } else {
-                    mensaje = 'No hay registros atendidos aún';
-                }
+            if (filtradas.length === 0) {
+                let mensaje = filtroRegistrosActual === 'todas' ? 'No hay registros hoy' :
+                             filtroRegistrosActual === 'pendientes' ? '¡Todo atendido! No hay registros pendientes' :
+                             'No hay registros atendidos aún';
                 
                 container.innerHTML = `
-                    <div class="col-12 empty-state">
-                        <i class="fas fa-inbox"></i>
-                        <h4 class="text-muted mt-3">${mensaje}</h4>
-                        <button class="btn btn-primary mt-3" onclick="cargarRegistrosDashboard()">
-                            <i class="fas fa-sync-alt me-2"></i>Actualizar
-                        </button>
+                    <div class="col-12">
+                        <div class="empty-state">
+                            <i class="fas fa-clipboard-list"></i>
+                            <h4 class="text-muted mt-3">${mensaje}</h4>
+                            <button class="btn btn-primary mt-3" onclick="cargarRegistrosDashboard()">
+                                <i class="fas fa-sync-alt me-2"></i>Actualizar
+                            </button>
+                        </div>
                     </div>
                 `;
                 return;
             }
             
-            container.innerHTML = registrosFiltrados.map((registro, index) => {
-                const nombre = registro.Nombre_Limpio || registro.Nombre || 'Sin nombre';
-                const fechaRegistro = registro.Fecha_Registro || '--/--/----';
-                const horaComida = registro.Hora_Comida || '--:--:--';
-                const estatus = registro.Estatus || 'PENDIENTE';
-                const esAtendido = estatus === 'ATENDIDO';
-                const horaAtendido = registro.Fecha_Atendido_Formateada || '';
-                const atendidoPor = registro.Usuario_Atiende || '';
-                
-                return `
-                <div class="col-md-6 col-lg-4 mb-4">
+            let html = '';
+            filtradas.forEach((reg, index) => {
+                const esAtendido = reg.Estatus === 'ATENDIDO';
+                html += `<div class="col-md-6 col-lg-4">
                     <div class="registro-card fade-in ${esAtendido ? 'atendida' : ''}">
                         <div class="d-flex justify-content-between align-items-start mb-3">
-                            <div>
-                                <span class="badge bg-primary">#${index + 1}</span>
-                                <span class="badge ${esAtendido ? 'bg-success' : 'bg-warning'} ms-1">
-                                    ${esAtendido ? 'ATENDIDO' : 'PENDIENTE'}
-                                </span>
-                            </div>
-                            <div>
-                                <span class="registro-badge">
-                                    <i class="fas fa-calendar-day me-1"></i>${fechaRegistro}
-                                </span>
-                            </div>
+                            <span class="badge bg-primary">#${index + 1}</span>
+                            <span class="badge ${esAtendido ? 'bg-success' : 'bg-warning'}">${esAtendido ? 'ATENDIDO' : 'PENDIENTE'}</span>
                         </div>
-                        
-                        <h5 class="fw-bold mb-2" style="color: var(--primary-dark);">
-                            <i class="fas fa-user me-2"></i>${nombre}
-                        </h5>
-                        
-                        <div class="mb-3">
-                            <div>
-                                <small class="text-muted">
-                                    <i class="fas fa-clock me-1"></i>Hora comida: ${horaComida}
-                                </small>
-                            </div>
-                            ${esAtendido ? `
-                            <div class="mt-1">
-                                <small class="text-success">
-                                    <i class="fas fa-user-check me-1"></i>Atendido: ${horaAtendido}
-                                </small>
-                            </div>
-                            ${atendidoPor ? `
-                            <div class="mt-1">
-                                <small class="text-muted">
-                                    <i class="fas fa-user-tie me-1"></i>Por: ${atendidoPor}
-                                </small>
-                            </div>
-                            ` : ''}
-                            ` : ''}
+                        <h5 class="fw-bold mb-2">${reg.Nombre_Limpio || reg.Nombre || 'Sin nombre'}</h5>
+                        <div class="mb-3 small">
+                            <div><i class="fas fa-clock me-1 text-muted"></i>Hora comida: ${reg.Hora_Comida || '--:--:--'}</div>
+                            ${esAtendido ? 
+                                `<div class="text-success"><i class="fas fa-user-check me-1"></i>Atendido: ${reg.Fecha_Atendido_Formateada || ''}</div>
+                                ${reg.Usuario_Atiende ? `<div class="text-muted"><i class="fas fa-user-tie me-1"></i>Por: ${reg.Usuario_Atiende}</div>` : ''}` : ''}
                         </div>
-                        
-                        ${!esAtendido ? `
-                        <div class="alert alert-warning">
-                            <i class="fas fa-info-circle me-2"></i>
-                            Este registro se mostrará en "Comidas a Servir" para ser atendido
-                        </div>
-                        ` : `
-                        <div class="alert alert-success">
-                            <i class="fas fa-check-circle me-2"></i>
-                            Registro ya fue atendido en el módulo de comidas
-                        </div>
-                        `}
+                        ${!esAtendido ? 
+                            `<div class="alert alert-warning py-2"><i class="fas fa-info-circle me-2"></i>Pendiente en "Comidas a Servir"</div>` : 
+                            `<div class="alert alert-success py-2"><i class="fas fa-check-circle me-2"></i>Atendido</div>`
+                        }
                     </div>
-                </div>
-                `;
-            }).join('');
+                </div>`;
+            });
+            container.innerHTML = html;
         }
         
-        // Crear nuevo registro
         async function crearRegistroComida(e) {
             e.preventDefault();
-            
             const form = e.target;
             const formData = new FormData(form);
             
-            // Validar que se haya seleccionado un nombre
-            const nombre = formData.get('nombre_corto');
-            if (!nombre) {
+            if (!formData.get('nombre_corto')) {
                 mostrarError('Debe seleccionar un empleado');
                 return;
             }
             
-            // Validar formato de fecha (dd-mm-yyyy)
             const fecha = formData.get('fecha_real');
             if (!/^\d{2}-\d{2}-\d{4}$/.test(fecha)) {
                 mostrarError('Formato de fecha incorrecto. Use dd-mm-yyyy');
                 return;
             }
             
-            // Validar formato de hora (HH:MM:SS)
             const hora = formData.get('hora_real');
             if (!/^\d{2}:\d{2}:\d{2}$/.test(hora)) {
                 mostrarError('Formato de hora incorrecto. Use HH:MM:SS');
@@ -3113,33 +3478,18 @@ if (isset($_GET['action'])) {
             }
             
             try {
-                const response = await fetch('?action=crear_registro_comida', {
-                    method: 'POST',
-                    body: formData
-                });
-                
+                const response = await fetch('?action=crear_registro_comida', { method: 'POST', body: formData });
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Mostrar mensaje de éxito
-                    mostrarAlerta('¡Éxito!', data.message, 'success');
-                    
-                    // Limpiar formulario
+                    mostrarAlerta('Éxito', data.message, 'success');
                     form.reset();
                     
-                    // Restablecer valores por defecto
                     const fechaPicker = document.getElementById('fechaPicker');
                     const horaPicker = document.getElementById('horaPicker');
+                    if (fechaPicker?._flatpickr) fechaPicker._flatpickr.setDate('today');
+                    if (horaPicker?._flatpickr) horaPicker._flatpickr.setDate('<?php echo date("H:i:s"); ?>');
                     
-                    if (fechaPicker && fechaPicker._flatpickr) {
-                        fechaPicker._flatpickr.setDate('today');
-                    }
-                    
-                    if (horaPicker && horaPicker._flatpickr) {
-                        horaPicker._flatpickr.setDate('<?php echo date("H:i:s"); ?>');
-                    }
-                    
-                    // Recargar registros
                     await cargarRegistrosDashboard();
                 } else {
                     mostrarError('Error al crear registro: ' + data.message);
@@ -3150,9 +3500,7 @@ if (isset($_GET['action'])) {
             }
         }
         
-        // ============ MÓDULO: ASIGNAR COMIDAS ============
-        
-        // Cargar cancelaciones (SOLO DE HOY)
+        // ============ FUNCIONES MÓDULO ASIGNAR ============
         async function cargarCancelaciones() {
             try {
                 const response = await fetch('?action=get_cancelaciones');
@@ -3162,21 +3510,14 @@ if (isset($_GET['action'])) {
                     cancelacionesData = data.cancelaciones;
                     actualizarVistaCancelaciones();
                     
-                    // Actualizar estadísticas
                     const total = cancelacionesData.length;
-                    const asignadas = cancelacionesData.filter(c => c.ESTATUS_APARTADO === 'ASIGNADO').length;
-                    const disponibles = total - asignadas;
-                    
                     document.getElementById('total-cancelaciones').textContent = total;
-                    document.getElementById('cancelaciones-asignadas').textContent = asignadas;
-                    document.getElementById('cancelaciones-disponibles').textContent = disponibles;
+                    document.getElementById('cancelaciones-aprobadas').textContent = total;
                     
                     const boton = document.querySelector('.btn-premium i.fa-sync-alt');
                     if (boton) {
                         boton.classList.add('fa-spin');
-                        setTimeout(() => {
-                            boton.classList.remove('fa-spin');
-                        }, 1000);
+                        setTimeout(() => boton.classList.remove('fa-spin'), 1000);
                     }
                 }
             } catch (error) {
@@ -3185,228 +3526,39 @@ if (isset($_GET['action'])) {
             }
         }
         
-        // Actualizar vista de cancelaciones
         function actualizarVistaCancelaciones() {
             const container = document.getElementById('vista-cancelaciones');
             if (!container) return;
             
             if (cancelacionesData.length === 0) {
-                container.innerHTML = `
-                    <div class="col-12 empty-state">
-                        <i class="fas fa-inbox"></i>
-                        <h4 class="text-muted mt-3">No hay cancelaciones disponibles hoy</h4>
-                        <p class="text-muted">No existen registros de cancelaciones aprobadas para el día de hoy</p>
-                        <button class="btn btn-primary mt-3" onclick="cargarCancelaciones()">
-                            <i class="fas fa-sync-alt me-2"></i>Actualizar
-                        </button>
-                    </div>
-                `;
+                container.innerHTML = '<div class="col-12"><div class="empty-state"><i class="fas fa-inbox"></i><h4 class="text-muted mt-3">No hay cancelaciones asignadas hoy</h4></div></div>';
                 return;
             }
             
-            container.innerHTML = cancelacionesData.map((cancelacion, index) => {
-                const esAsignada = cancelacion.ESTATUS_APARTADO === 'ASIGNADO';
-                const fechaMostrar = cancelacion.FECHA_FORMATEADA || 'N/A';
-                
-                return `
-                <div class="col-md-6 col-lg-4 mb-4">
-                    <div class="cancelacion-card fade-in ${esAsignada ? 'asignada' : ''}">
+            let html = '';
+            cancelacionesData.forEach((can, index) => {
+                html += `<div class="col-md-6 col-lg-4">
+                    <div class="cancelacion-card fade-in asignada">
                         <div class="d-flex justify-content-between align-items-start mb-3">
-                            <div>
-                                <span class="badge bg-primary">#${index + 1}</span>
-                                <span class="badge bg-info ms-1">${cancelacion.TIPO_CONSUMO || 'SIN TIPO'}</span>
-                            </div>
-                            <div>
-                                <span class="badge ${esAsignada ? 'bg-success' : 'bg-warning'}">
-                                    ${esAsignada ? 'ASIGNADA' : 'DISPONIBLE'}
-                                </span>
-                            </div>
+                            <span class="badge bg-primary">#${index + 1}</span>
+                            <span class="badge bg-info ms-1">${can.TIPO_CONSUMO || 'SIN TIPO'}</span>
+                            <span class="badge bg-success">ASIGNADA</span>
                         </div>
-                        
-                        <h5 class="fw-bold mb-2" style="color: var(--primary-dark);">
-                            <i class="fas fa-user me-2"></i>${cancelacion.NOMBRE || 'Sin nombre'}
-                        </h5>
-                        
-                        <div class="mb-3">
-                            <div class="info-row">
-                                <span class="info-label">Depto:</span> ${cancelacion.DEPARTAMENTO || 'N/A'}
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Jefe:</span> ${cancelacion.JEFE || 'N/A'}
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Fecha:</span> ${fechaMostrar}
-                            </div>
-                            ${cancelacion.CAUSA ? `
-                            <div class="info-row">
-                                <span class="info-label">Causa:</span> ${cancelacion.CAUSA}
-                            </div>
-                            ` : ''}
+                        <h5 class="fw-bold mb-2">${can.NOMBRE || 'Sin nombre'}</h5>
+                        <div class="mb-3 small">
+                            <div><span class="fw-bold">Depto:</span> ${can.DEPARTAMENTO || 'N/A'}</div>
+                            <div><span class="fw-bold">Jefe:</span> ${can.JEFE || 'N/A'}</div>
+                            <div><span class="fw-bold">Fecha:</span> ${can.FECHA_FORMATEADA || 'N/A'}</div>
+                            ${can.CAUSA ? `<div><span class="fw-bold">Causa:</span> ${can.CAUSA}</div>` : ''}
                         </div>
-                        
-                        ${esAsignada ? `
-                            <div class="alert alert-success py-2">
-                                <i class="fas fa-user-check me-2"></i>
-                                <strong>Asignado a:</strong> ${cancelacion.USUARIO_APARTA || 'N/A'}
-                                ${cancelacion.FECHA_APARTADO_FORMATEADA ? `
-                                <br><small class="text-muted">
-                                    <i class="fas fa-calendar-check me-1"></i>${cancelacion.FECHA_APARTADO_FORMATEADA}
-                                </small>
-                                ` : ''}
-                            </div>
-                            <button class="btn btn-danger w-100" onclick="liberarCancelacion(${index})">
-                                <i class="fas fa-unlock me-2"></i>Liberar Cancelación
-                            </button>
-                        ` : `
-                            <button class="btn-premium w-100" onclick="mostrarModalAsignar(${index})">
-                                <i class="fas fa-user-plus me-2"></i>Asignar Cancelación
-                            </button>
-                        `}
+                        <div class="alert alert-success py-2">
+                            <i class="fas fa-user-check me-2"></i><strong>Asignado a:</strong> ${can.USUARIO_APARTA || 'No asignado'}<br>
+                            <small class="text-muted"><i class="fas fa-calendar-check me-1"></i>${can.FECHA_APARTADO_FORMATEADA || 'N/A'}</small>
+                        </div>
                     </div>
-                </div>
-                `;
-            }).join('');
-        }
-        
-        // Mostrar modal para asignar
-        function mostrarModalAsignar(index) {
-            currentCancelacion = cancelacionesData[index];
-            
-            // Limpiar select
-            document.getElementById('select-empleado').value = '';
-            
-            // Mostrar información de la cancelación
-            document.getElementById('asignar-info').innerHTML = `
-                <strong>Cancelación:</strong> ${currentCancelacion.NOMBRE}<br>
-                <strong>Tipo:</strong> ${currentCancelacion.TIPO_CONSUMO}<br>
-                <strong>Fecha:</strong> ${currentCancelacion.FECHA_FORMATEADA}<br>
-                <strong>Departamento:</strong> ${currentCancelacion.DEPARTAMENTO || 'N/A'}
-            `;
-            
-            const modal = new bootstrap.Modal(document.getElementById('asignarModal'));
-            modal.show();
-        }
-        
-        // Ejecutar asignación
-        async function ejecutarAsignacion() {
-            const modal = bootstrap.Modal.getInstance(document.getElementById('asignarModal'));
-            const select = document.getElementById('select-empleado');
-            const idPersona = select.value;
-            const nombrePersona = select.options[select.selectedIndex].text;
-            
-            if (!idPersona) {
-                mostrarError('Debes seleccionar un empleado');
-                return;
-            }
-            
-            try {
-                const formData = new FormData();
-                formData.append('nombre_cancelacion', currentCancelacion.NOMBRE);
-                formData.append('tipo_consumo', currentCancelacion.TIPO_CONSUMO);
-                formData.append('fecha_cancelacion', currentCancelacion.FECHA_SQL);
-                formData.append('id_persona', idPersona);
-                formData.append('nombre_persona', nombrePersona);
-                
-                const response = await fetch('?action=asignar_cancelacion', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                modal.hide();
-                
-                if (data.success) {
-                    mostrarAlerta('¡Éxito!', data.message, 'success');
-                    await cargarCancelaciones();
-                } else {
-                    mostrarError('Error al asignar: ' + data.message);
-                }
-            } catch (error) {
-                modal.hide();
-                console.error("Error:", error);
-                mostrarError('Error al asignar cancelación');
-            }
-        }
-        
-        // Liberar cancelación
-        async function liberarCancelacion(index) {
-            const cancelacion = cancelacionesData[index];
-            
-            const confirmacion = await Swal.fire({
-                title: '¿Liberar cancelación?',
-                html: `
-                    <div class="text-start">
-                        <p><strong>Cancelación:</strong> ${cancelacion.NOMBRE}</p>
-                        <p><strong>Tipo:</strong> ${cancelacion.TIPO_CONSUMO}</p>
-                        <p><strong>Fecha:</strong> ${cancelacion.FECHA_FORMATEADA}</p>
-                        <p><strong>Asignado a:</strong> ${cancelacion.USUARIO_APARTA || 'N/A'}</p>
-                    </div>
-                `,
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: 'Sí, liberar',
-                cancelButtonText: 'Cancelar',
-                confirmButtonColor: '#dc3545'
+                </div>`;
             });
-            
-            if (!confirmacion.isConfirmed) return;
-            
-            try {
-                const formData = new FormData();
-                formData.append('nombre_cancelacion', cancelacion.NOMBRE);
-                formData.append('tipo_consumo', cancelacion.TIPO_CONSUMO);
-                formData.append('fecha_cancelacion', cancelacion.FECHA_SQL);
-                
-                const response = await fetch('?action=liberar_cancelacion', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    mostrarAlerta('¡Éxito!', data.message, 'success');
-                    await cargarCancelaciones();
-                } else {
-                    mostrarError('Error al liberar: ' + data.message);
-                }
-            } catch (error) {
-                console.error("Error:", error);
-                mostrarError('Error al liberar cancelación');
-            }
-        }
-        
-        // ============ FUNCIONES GENERALES ============
-        
-        // Mostrar alerta
-        function mostrarAlerta(titulo, mensaje, tipo = 'info') {
-            const Toast = Swal.mixin({
-                toast: true,
-                position: 'top-end',
-                showConfirmButton: false,
-                timer: 3000,
-                timerProgressBar: true,
-                background: tipo === 'success' ? '#28a745' : 
-                           tipo === 'error' ? '#dc3545' : 
-                           tipo === 'warning' ? '#ffc107' : '#17a2b8',
-                color: 'white'
-            });
-            
-            Toast.fire({
-                icon: tipo,
-                title: mensaje
-            });
-        }
-        
-        // Mostrar error
-        function mostrarError(mensaje) {
-            Swal.fire({
-                icon: 'error',
-                title: 'Error',
-                text: mensaje,
-                confirmButtonColor: '#dc3545'
-            });
+            container.innerHTML = html;
         }
         
         <?php endif; ?>
