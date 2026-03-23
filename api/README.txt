@@ -1,324 +1,345 @@
 ================================================================================
-  CLIENTE API UNIFICADO - SISTEMA COMEDOR BACROCORP
+  API CLIENTE UNIFICADO - SISTEMA COMEDOR BACROCORP
+  Basado en: BACROS_Comedor.postman_collection.json
 ================================================================================
 
-DESCRIPCIÓN
------------
-Este directorio contiene el cliente unificado para consumir la API REST del
-backend del sistema de comedor. Reemplaza y consolida todos los archivos
-antiguos de configuración y clientes HTTP.
+ESTRUCTURA DE ARCHIVOS
+-----------------------
+  api/
+  ├── Api.php              <- Punto de entrada unico (require esto en tus paginas)
+  ├── ApiConfig.php        <- Deteccion de entorno (local / desarrollo / produccion)
+  ├── TokenManager.php     <- JWT en sesion PHP
+  ├── HttpClient.php       <- Cliente curl (GET/POST/PUT/DELETE)
+  └── modules/
+      ├── AuthApi.php          POST /auth/login, validate, refresh, profile
+      ├── PedidosApi.php       semanas-disponibles, verificar, crear, mis-pedidos, perfil
+      ├── ConsumosApi.php      mis-consumos, reporte
+      ├── CancelacionesApi.php validaciones, crear, mis-cancelaciones, pendientes
+      ├── EmpleadosApi.php     perfil, listar, crear, actualizar, eliminar
+      ├── EstadisticasApi.php  mis-consumos, cancelaciones, consumo, dashboard
+      ├── MenuApi.php          listar, semana, crear, actualizar, eliminar
+      ├── ReporteApi.php       detallado
+      ├── AdminApi.php         dashboard, cancelaciones-pendientes, usuarios CRUD, reportes
+      ├── CheckadorApi.php     disponibilidad, registrar, desglose (sin JWT)
+      └── CocinaApi.php        entradas / complementos / cancelaciones / pedidos / compras
 
-ARCHIVO PRINCIPAL
------------------
-  Api.php - Cliente unificado con todas las funcionalidades
-
-ESTRUCTURA
-----------
-  /api/          - Cliente API principal (este directorio)
   /deprecated/   - Archivos obsoletos (no usar)
   /tests/        - Scripts de prueba
-  /examples/     - Ejemplos de implementación
+
 
 ================================================================================
-  USO BÁSICO
+  COMO INCLUIR EN CUALQUIER PAGINA
 ================================================================================
 
-1. INCLUIR EL CLIENTE
----------------------
-require_once __DIR__ . '/api/Api.php';
+require_once __DIR__ . '/api/Api.php';   // desde la raiz del proyecto
 
-2. AUTENTICACIÓN
-----------------
-// Login
-$result = Api::auth()->login('usuario', 'password');
 
-// Verificar autenticación
-if (!Api::isAuthenticated()) {
-    header("Location: Admiin.php");
-    exit;
-}
+================================================================================
+  TIPOS DE PAGINA
+================================================================================
 
-// Obtener usuario actual
-$user = Api::getCurrentUser();
-// Retorna: ['id_empleado' => ..., 'nombre' => ..., 'area' => ..., 'usuario' => ...]
+--- PAGINA PUBLICA (sin login) ---
+  Ejemplo: CHECADORF.php, Desglosechecador.php
 
-// Cerrar sesión
-Api::auth()->logout();
+    <?php
+    header("Cache-Control: no-store");
+    require_once __DIR__ . '/api/Api.php';
+    // Sin nada mas — llamar endpoints publicos directamente
+    $data = Api::checador()->disponibilidad();
+    ?>
 
-3. PEDIDOS
-----------
-// Obtener perfil
-$perfil = Api::pedidos()->perfil();
+--- PAGINA CON LOGIN (usuario normal) ---
+  Ejemplo: MenUsuario.php, Menpedidos.php, AgendaPedidos.php
 
-// Verificar si puede ordenar
-$verificar = Api::pedidos()->verificar('2026-01-27');
+    <?php
+    header("Cache-Control: no-store");
+    require_once __DIR__ . '/api/Api.php';
+    Api::requireAuth();                   // redirige a Admiin.php si no hay sesion
+    $user = Api::getCurrentUser();        // ['id_empleado', 'nombre', 'area', 'usuario']
+    ?>
 
-// Crear pedido semanal
-$resultado = Api::pedidos()->crear(
-    '2026-01-27',  // Fecha (lunes de la semana)
-    [              // Desayunos
-        'lunes' => 'Desayuno',
-        'martes' => 'Desayuno',
-        'miercoles' => '',
-        'jueves' => 'Desayuno',
-        'viernes' => ''
-    ],
-    [              // Comidas
-        'lunes' => 'Comida',
-        'martes' => '',
-        'miercoles' => 'Comida',
-        'jueves' => 'Comida',
-        'viernes' => 'Comida'
-    ]
-);
+--- PAGINA SOLO ADMIN ---
+  Ejemplo: admicome4.php, gestusu.php
 
-// Obtener mis pedidos
-$pedidos = Api::pedidos()->misPedidos();
+    <?php
+    header("Cache-Control: no-store");
+    require_once __DIR__ . '/api/Api.php';
+    Api::requireAuth();
+    $user = Api::getCurrentUser();
+    $areasAdmin = ['DIRECCIÓN', 'ADMINISTRADOR', 'SISTEMAS'];
+    if (!in_array(strtoupper($user['area']), $areasAdmin, true)) {
+        header('Location: MenUsuario.php');
+        exit;
+    }
+    // A partir de aqui: usar Api::admin()->...
+    ?>
 
-// Obtener semanas disponibles
-$semanas = Api::pedidos()->semanasDisponibles();
 
-4. CONSUMOS
------------
-// Obtener consumos de una semana
-$consumos = Api::consumos()->misConsumos('2026-01-27');
+================================================================================
+  MODULOS Y METODOS
+================================================================================
 
-// Obtener estadísticas
-$estadisticas = Api::consumos()->estadisticas();
+------------------------------------------------------------------------
+AUTH
+  Frontend: Admiin.php
+------------------------------------------------------------------------
+  Api::auth()->login($usuario, $contrasena)   // guarda JWT en sesion
+  Api::auth()->logout()                        // destruye sesion local
+  Api::auth()->validarToken()                  // GET /auth/validate
+  Api::auth()->refrescarToken()               // POST /auth/refresh
+  Api::auth()->perfil()                        // GET /auth/profile
 
-5. CANCELACIONES
-----------------
-// Obtener validaciones
-$validaciones = Api::cancelaciones()->validaciones();
+  Atajos directos:
+  Api::requireAuth()                           // redirige si no autenticado
+  Api::isAuthenticated()                       // bool
+  Api::getCurrentUser()                        // array con datos del usuario
+  Api::getToken()                              // string JWT actual
 
-// Crear cancelación
-$resultado = Api::cancelaciones()->crear([
-    'jefe' => 'Nombre del jefe',
-    'tipo_consumo' => 'DESAYUNO',  // DESAYUNO, COMIDA, AMBOS
-    'fecha' => '2026-01-28',
-    'causa' => 'SALUD'  // SALUD, PERSONAL, VACACIONES, COMISIÓN, REUNIÓN
-]);
+------------------------------------------------------------------------
+PEDIDOS
+  Frontend: Menpedidos.php, Menpedidos1.php, AgendaPedidos.php
+------------------------------------------------------------------------
+  Api::pedidos()->semanasDisponibles()
+  Api::pedidos()->verificar($fecha)            // $fecha = 'YYYY-MM-DD'
+  Api::pedidos()->crear($fechaSemana, $desayunos, $comidas)
+  Api::pedidos()->agendar($fechaSemana, $desayunos, $comidas)
+  Api::pedidos()->misPedidos()
+  Api::pedidos()->perfil()
 
-// Obtener mis cancelaciones
-$cancelaciones = Api::cancelaciones()->misCancelaciones();
+  Ejemplo crear pedido:
+    Api::pedidos()->crear(
+        '2026-03-17',
+        ['lunes' => 'Desayuno', 'martes' => 'Desayuno', 'miercoles' => '',  'jueves' => 'Desayuno', 'viernes' => ''],
+        ['lunes' => 'Comida',   'martes' => '',          'miercoles' => 'Comida', 'jueves' => '',  'viernes' => 'Comida']
+    );
 
-6. EMPLEADOS
-------------
-// Obtener perfil del empleado
-$perfil = Api::empleados()->perfil();
+------------------------------------------------------------------------
+CONSUMOS
+  Frontend: aparta_consumo_modificado.php, Descrip_Consumo.php, REPOCOMEDOR.php
+------------------------------------------------------------------------
+  Api::consumos()->misConsumos($fecha)         // $fecha opcional 'YYYY-MM-DD'
+  Api::consumos()->reporte()                   // admin: reporte completo
 
-// Listar empleados
-$empleados = Api::empleados()->listar();
+------------------------------------------------------------------------
+CANCELACIONES
+  Frontend: FormatCancel.php, Formacancel123456.php, EstadCancelaciones.php,
+            EstadisticasCancelaciones.php, MenUsuario.php
+------------------------------------------------------------------------
+  Api::cancelaciones()->validaciones()
+  Api::cancelaciones()->crear([
+      'jefe'         => 'Nombre del jefe',
+      'tipo_consumo' => 'DESAYUNO',   // DESAYUNO | COMIDA | AMBOS
+      'fecha'        => 'YYYY-MM-DD',
+      'causa'        => 'PERSONAL'    // SALUD | PERSONAL | VACACIONES | COMISIÓN | REUNIÓN
+  ])
+  Api::cancelaciones()->misCancelaciones()
+  Api::cancelaciones()->pendientes()           // badge en MenUsuario.php
 
-// Crear empleado
-$resultado = Api::empleados()->crear($datos);
+------------------------------------------------------------------------
+EMPLEADOS
+  Frontend: MenUsuario.php (perfil), gestusu.php (CRUD admin)
+------------------------------------------------------------------------
+  Api::empleados()->perfil()
+  Api::empleados()->listar($search)            // $search opcional
+  Api::empleados()->crear([
+      'id_empleado' => 456,
+      'nombre'      => 'Maria Lopez',
+      'area'        => 'Contabilidad',
+      'usuario'     => 'maria.lopez',   // opcional
+      'contrasena'  => 'pass123'        // opcional
+  ])
+  Api::empleados()->actualizar($id, [
+      'id_empleado_nuevo' => 456,       // permite cambiar el numero
+      'nombre'            => 'Nuevo nombre',
+      'area'              => 'Finanzas',
+      'usuario'           => 'maria.lopez',
+      'contrasena'        => null       // null = no cambia la contrasena
+  ])
+  Api::empleados()->eliminar($id)
 
-// Actualizar empleado
-$resultado = Api::empleados()->actualizar($id, $datos);
+------------------------------------------------------------------------
+ESTADISTICAS
+  Frontend: KPI_anacomp.php, EstadisticasCancelaciones.php, EstadCancelaciones.php
+------------------------------------------------------------------------
+  Api::estadisticas()->misConsumos()           // stats personales por dia
+  Api::estadisticas()->cancelaciones()         // agrupadas por causa y tipo
+  Api::estadisticas()->consumo()               // distribucion por dia de semana
+  Api::estadisticas()->dashboard()             // conteos globales simplificados
 
-// Eliminar empleado
-$resultado = Api::empleados()->eliminar($id);
+------------------------------------------------------------------------
+MENU
+  Frontend: Menu.php, Menpedidos.php, Admin
+------------------------------------------------------------------------
+  Api::menu()->listar()
+  Api::menu()->semana($fecha)                  // $fecha = lunes 'YYYY-MM-DD'
+  Api::menu()->crear([
+      'semana'    => 'YYYY-MM-DD',
+      'lunes'     => ['desayuno' => 'Chilaquiles', 'comida' => 'Pollo'],
+      'martes'    => ['desayuno' => 'Tamales',     'comida' => 'Carne'],
+      'miercoles' => [...],
+      'jueves'    => [...],
+      'viernes'   => [...]
+  ])
+  Api::menu()->actualizar($id, ['lunes' => ['desayuno' => 'Nuevo platillo', 'comida' => '...']])
+  Api::menu()->eliminar($id)
 
-7. MENÚ
--------
-// Listar menús
-$menus = Api::menu()->listar();
+------------------------------------------------------------------------
+REPORTE
+  Frontend: REPOCOMEDOR.php
+------------------------------------------------------------------------
+  Api::reporte()->detallado()                  // sin filtro
+  Api::reporte()->detallado([
+      'fecha_inicio' => '2026-03-01',
+      'fecha_fin'    => '2026-03-31'
+  ])
 
-// Obtener menú de una semana
-$menu = Api::menu()->semana('2026-01-27');
+------------------------------------------------------------------------
+ADMIN  (requiere area DIRECCIÓN / ADMINISTRADOR / SISTEMAS)
+  Frontend: admicome4.php, gestusu.php, REPOCOMEDOR.php, EstadisticasCancelaciones.php
+------------------------------------------------------------------------
+  Api::admin()->dashboard()                    // metricas completas sin filtro
+  Api::admin()->dashboard([
+      'fecha_inicio' => '2026-03-01',
+      'fecha_fin'    => '2026-03-31'
+  ])
+  Api::admin()->cancelacionesPendientes()      // conteo global para badge
 
-// Crear menú
-$resultado = Api::menu()->crear($datos);
+  // Usuarios (mismo CRUD que empleados, rutas /admin/comedor/usuarios)
+  Api::admin()->listarUsuarios($search)
+  Api::admin()->crearUsuario($datos)
+  Api::admin()->actualizarUsuario($id, $datos)
+  Api::admin()->eliminarUsuario($id)
 
-// Actualizar menú
-$resultado = Api::menu()->actualizar($id, $datos);
+  // Reportes admin (ambas fechas requeridas)
+  Api::admin()->reportePrincipal('2026-03-01', '2026-03-31')
+  Api::admin()->reporteCancelaciones('2026-03-01', '2026-03-31')
+  Api::admin()->reporteComplementos('2026-03-01', '2026-03-31')
 
-// Eliminar menú
-$resultado = Api::menu()->eliminar($id);
+------------------------------------------------------------------------
+CHECADOR  (sin JWT — dispositivo fisico en la entrada)
+  Frontend: CHECADORF.php, Desglosechecador.php
+------------------------------------------------------------------------
+  Api::checador()->disponibilidad()
+  Api::checador()->registrar($nombre, $complemento)
+    // $nombre      = string del QR "PEREZ GARCIA JUAN|123|SISTEMAS" o nombre manual
+    // $complemento = 'CAFÉ O TÉ' | 'TORTILLAS' | 'AGUA' | 'DESECHABLE' | 'COMIDA PARA LLEVAR' | null
+  Api::checador()->desglose($fechaInicio, $fechaFin)
+    // ambos opcionales, default: hoy
 
-8. REPORTES
------------
-// Obtener dashboard
-$dashboard = Api::reportes()->dashboard();
+------------------------------------------------------------------------
+COCINA  (sub-modulos encadenados)
+  Frontend: dchef.php, CocinaTotalPedidos.php, AgendaPedidos.php, MenComprasCocina.php
+------------------------------------------------------------------------
+  // Entradas
+  Api::cocina()->entradas()->listar()
+  Api::cocina()->entradas()->estadisticas()
+  Api::cocina()->entradas()->atender($nombre, $horaEntrada, $fechaHora)
 
-// Reporte detallado
-$reporte = Api::reportes()->detallado(['fecha_inicio' => '2026-01-01', 'fecha_fin' => '2026-01-31']);
+  // Complementos
+  Api::cocina()->complementos()->listar()
+  Api::cocina()->complementos()->estadisticas()
+  Api::cocina()->complementos()->atender($nombre, $complemento, $fecha, $hora)
 
-// Estadísticas de cancelaciones
-$stats = Api::reportes()->cancelaciones();
+  // Cancelaciones de cocina
+  Api::cocina()->cancelaciones()->listar()
+  Api::cocina()->cancelaciones()->asignar($nombreCancelacion, $tipoConsumo, $fechaCancelacion, $nombrePersona)
+  Api::cocina()->cancelaciones()->liberar($nombreCancelacion, $tipoConsumo, $fechaCancelacion)
 
-// Estadísticas de consumo
-$stats = Api::reportes()->consumo();
+  // Pedidos semana
+  Api::cocina()->pedidos()->semana()           // CTE + UNPIVOT: fila por empleado/dia/servicio
+  Api::cocina()->pedidos()->totalesSemana()    // PIVOT: suma lunes-viernes
+  Api::cocina()->pedidos()->detalle()          // eleccion por dia por empleado
+
+  // Lista de compras
+  Api::cocina()->compras()->guardar([
+      'fecha'      => 'YYYY-MM-DD',
+      'carnes'     => ['Pollo 5kg', 'Res 3kg'],
+      'frutas'     => ['Manzanas 2kg'],
+      'verduras'   => ['Tomates 1kg'],
+      'lacteos'    => ['Leche 2L'],
+      'accesorios' => ['Papel aluminio']
+  ])
+  Api::cocina()->compras()->listar('YYYY-MM-DD')
+
 
 ================================================================================
   FORMATO DE RESPUESTA
 ================================================================================
 
-Todas las llamadas retornan un array con esta estructura:
+Todas las llamadas retornan:
 
-ÉXITO:
-------
-[
-    'success' => true,
-    'data' => [...],           // Datos de la API
-    'http_code' => 200
-]
+  EXITO:
+    ['success' => true,  'data' => [...], 'http_code' => 200]
 
-ERROR:
-------
-[
-    'success' => false,
-    'error' => 'Mensaje de error',
-    'data' => null,
-    'http_code' => 400
-]
+  ERROR:
+    ['success' => false, 'error' => 'Mensaje', 'data' => null, 'http_code' => 400]
 
-MANEJO DE RESPUESTAS:
----------------------
-$result = Api::pedidos()->misPedidos();
+  Patron de uso:
+    $result = Api::pedidos()->misPedidos();
+    if ($result['success']) {
+        $data = $result['data'];
+    } else {
+        $error = $result['error'];  // string descriptivo
+    }
 
-if ($result['success']) {
-    $pedidos = $result['data'];
-    // Procesar pedidos...
-} else {
-    echo "Error: " . $result['error'];
-}
 
 ================================================================================
-  CONFIGURACIÓN DEL ENTORNO
+  CONFIGURACION DE ENTORNO (automatica)
 ================================================================================
 
-El cliente detecta automáticamente el entorno:
+  local       - localhost sin Docker     -> http://127.0.0.1:3000
+  desarrollo  - hostname con "desarollo" -> http://desarollo-bacros:3000
+  produccion  - Docker en produccion     -> http://host.docker.internal:3000
 
-LOCAL:
-  - Localhost sin Docker
-  - URL API: http://localhost:3000/api
+  Para ver el entorno detectado:
+    $info = Api::info();
+    // ['entorno', 'api_url', 'timeout', 'debug', 'authenticated', 'has_token']
 
-DESARROLLO:
-  - Servidor con "desarollo" o "dev" en el hostname
-  - URL API: http://desarollo-bacros:3000/api
+  Para forzar entorno editar ApiConfig.php linea ~30:
+    return 'produccion';  // local | desarrollo | produccion
 
-PRODUCCIÓN:
-  - Docker o servidores de producción
-  - URL API: http://host.docker.internal:3000/api
-
-FORZAR ENTORNO:
----------------
-Editar api/Api.php línea ~80:
-$this->entorno = 'produccion';  // local, desarrollo, produccion
 
 ================================================================================
-  UTILIDADES
+  FUNCIONES LEGACY (compatibilidad con codigo anterior)
 ================================================================================
 
-// Obtener información del sistema
-$info = Api::info();
-// Retorna: entorno, api_url, timeout, debug, authenticated, has_token
+  Funcion vieja                ->  Equivalente nuevo
+  -----------------------------------------------------------
+  getAPIClient()               ->  Api::http()
+  getJwtToken()                ->  Api::getToken()
+  setJwtToken($token)          ->  TokenManager::save($token)
+  clearJwtToken()              ->  TokenManager::clear()
+  isUserAuthenticated()        ->  Api::isAuthenticated()
+  requireAuthentication()      ->  Api::requireAuth()
+  getCurrentUser()             ->  Api::getCurrentUser()
+  obtenerPerfilUsuario()       ->  Api::pedidos()->perfil()
+  obtenerSemanasDisponibles()  ->  Api::pedidos()->semanasDisponibles()
+  obtenerConsumosSemanales($f) ->  Api::consumos()->misConsumos($f)
+  crearPedidoSemanal(...)      ->  Api::pedidos()->crear(...)
 
-// Cliente HTTP directo (casos especiales)
-$http = Api::http();
-$result = $http->get('/custom/endpoint');
-
-// Configuración
-$config = Api::config();
-$apiUrl = $config->getApiUrl();
-$entorno = $config->getEntorno();
-
-================================================================================
-  FUNCIONES LEGACY (Compatibilidad)
-================================================================================
-
-Para mantener compatibilidad con código existente:
-
-getAPIClient()              ->  Api::http()
-getJwtToken()               ->  Api::getToken()
-setJwtToken($token)         ->  TokenManager::save($token)
-isUserAuthenticated()       ->  Api::isAuthenticated()
-requireAuthentication()     ->  Api::requireAuth()
-getCurrentUser()            ->  Api::getCurrentUser()
-
-NOTA: Se recomienda migrar al nuevo sistema Api::modulo()->metodo()
-
-================================================================================
-  ENDPOINTS DISPONIBLES EN EL BACKEND
-================================================================================
-
-AUTENTICACIÓN:
-  POST   /auth/login                    - Login de usuario
-  GET    /auth/profile                  - Perfil del usuario
-  GET    /auth/verify                   - Verificar token
-
-PEDIDOS:
-  GET    /api/pedidos/perfil            - Perfil para pedidos
-  GET    /api/pedidos/verificar         - Verificar límite (?fecha=YYYY-MM-DD)
-  POST   /api/pedidos                   - Crear nuevo pedido
-  GET    /api/pedidos/mis-pedidos       - Obtener pedidos del usuario
-  GET    /api/pedidos/semanas-disponibles - Semanas disponibles
-
-CANCELACIONES:
-  GET    /api/cancelaciones/validaciones       - Reglas de validación
-  POST   /api/cancelaciones                    - Crear cancelación
-  GET    /api/cancelaciones/mis-cancelaciones  - Listar cancelaciones
-  GET    /api/cancelaciones/pendientes         - Cancelaciones pendientes
-
-EMPLEADOS:
-  GET    /api/empleados                 - Información del empleado
-  GET    /api/empleados/perfil          - Perfil del empleado
-
-REPORTES:
-  GET    /api/reporte/reporte-detallado - Reporte detallado con PIVOT dinámico
 
 ================================================================================
   DEBUGGING
 ================================================================================
 
-Para ver información de debug:
+  error_log(json_encode(Api::info()));
+  error_log(json_encode(Api::getCurrentUser()));
+  error_log('Token: ' . Api::getToken());
 
-error_log("API Info: " . json_encode(Api::info()));
-error_log("User: " . json_encode(Api::getCurrentUser()));
-error_log("Token: " . Api::getToken());
+  // Ver respuesta cruda del backend
+  $result = Api::pedidos()->misPedidos();
+  error_log('HTTP: ' . $result['http_code']);
+  error_log('Data: ' . json_encode($result['data']));
 
-================================================================================
-  MANEJO DE ERRORES
-================================================================================
-
-El cliente maneja automáticamente:
-  - Errores de conexión
-  - Errores HTTP (4xx, 5xx)
-  - Timeouts
-  - Respuestas JSON inválidas
-  - Tokens expirados
-
-Todos los errores se retornan en el formato estándar:
-[
-    'success' => false,
-    'error' => 'Descripción del error',
-    'http_code' => código_http
-]
 
 ================================================================================
   SEGURIDAD
 ================================================================================
 
-- Los tokens JWT se almacenan automáticamente en $_SESSION
-- Las peticiones incluyen automáticamente el header Authorization
-- El cliente verifica la autenticación en cada llamada
-- Los tokens expiran después de 24 horas (86400 segundos)
-- El sistema regenera el session_id después del login exitoso
-
-================================================================================
-  SOPORTE
-================================================================================
-
-Para reportar problemas o sugerencias:
-- Revisar los logs en error_log de PHP
-- Verificar que el backend esté corriendo en http://localhost:3000
-- Comprobar que el token JWT sea válido
-- Revisar la configuración de entorno
-
-Archivos relacionados:
-  - api/Api.php           - Cliente unificado
-  - deprecated/           - Archivos obsoletos (referencia)
-  - tests/test_api.php    - Script de pruebas
+  - JWT almacenado en $_SESSION (nunca en localStorage ni cookies)
+  - Todas las peticiones incluyen automaticamente Authorization: Bearer <token>
+  - AdminApi verifica el area del usuario ANTES de llamar al backend
+  - Los tokens expiran en 24h (86400 segundos)
+  - El backend valida el JWT independientemente de la capa PHP
 
 ================================================================================
