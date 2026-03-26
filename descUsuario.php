@@ -64,44 +64,61 @@ function obtenerUsuarioPorNombre($conn, $nombre) {
 }
 
 // ==================== FUNCIONES DE CÁLCULO DE PRECIOS ====================
-function calcularCostoConsumo($fecha, $cantidadConsumos, $tieneEntrada) {
-    $year = date('Y', strtotime($fecha));
-    
+function calcularCostoConsumo($fecha, $tipoComida, $tieneEntrada, $year) {
+    // Precios según el año y tipo de comida
     if ($year < 2026) {
-        $precioUnitario = 30;
-        $costoPorConsumo = $precioUnitario * $cantidadConsumos;
+        // Antes de 2026: todos los consumos a $30
+        $precio = 30;
+        $costoTotal = $tieneEntrada ? $precio : ($precio * 2);
+        
+        return [
+            'costo_total' => $costoTotal,
+            'precio_unitario' => $precio,
+            'tiene_descuento' => $tieneEntrada,
+            'aplica_doble' => !$tieneEntrada,
+            'year' => $year
+        ];
     } else {
-        if ($cantidadConsumos == 2) {
-            $costoPorConsumo = 35 + 45;
-        } elseif ($cantidadConsumos == 1) {
-            $costoPorConsumo = 45;
+        // Desde 2026: diferentes precios por tipo de comida
+        if ($tipoComida == 'Desayuno') {
+            $precio = 35;
+        } elseif ($tipoComida == 'Comida') {
+            $precio = 45;
+        } elseif ($tipoComida == 'Ambos') {
+            $precio = 80; // 35 + 45
         } else {
-            $costoPorConsumo = 0;
+            $precio = 0;
         }
+        
+        $costoTotal = $tieneEntrada ? $precio : ($precio * 2);
+        
+        return [
+            'costo_total' => $costoTotal,
+            'precio_unitario' => $precio,
+            'tiene_descuento' => $tieneEntrada,
+            'aplica_doble' => !$tieneEntrada,
+            'year' => $year
+        ];
     }
-    
-    $costoTotal = $tieneEntrada ? $costoPorConsumo : ($costoPorConsumo * 2);
-    
-    return [
-        'costo_total' => $costoTotal,
-        'precio_unitario' => $year < 2026 ? 30 : ($cantidadConsumos == 2 ? [35, 45] : [45]),
-        'tiene_descuento' => $tieneEntrada,
-        'aplica_doble' => !$tieneEntrada,
-        'year' => $year
-    ];
 }
 
 // Función para calcular monto de entradas según rangos de precios
-function calcularMontoEntradas($fecha, $cantidadConsumos) {
-    $year = date('Y', strtotime($fecha));
-    
+function calcularMontoEntradas($fecha, $tipoComida, $year) {
     if ($year < 2026) {
-        return $cantidadConsumos * 30;
+        if ($tipoComida == 'Ambos') {
+            return 60; // 30 + 30
+        } else {
+            return 30;
+        }
     } else {
-        if ($cantidadConsumos == 2) {
+        if ($tipoComida == 'Desayuno') {
+            return 35;
+        } elseif ($tipoComida == 'Comida') {
+            return 45;
+        } elseif ($tipoComida == 'Ambos') {
             return 80; // 35 + 45
         } else {
-            return 45; // Solo comida
+            return 0;
         }
     }
 }
@@ -201,6 +218,8 @@ $miFilaData = null;
 $consumosPorDia = [];
 $detalleConsumosPorDia = [];
 $detalleMontosPorDia = [];
+$tiposComidaPorFecha = [];
+$consumosAgendadosPorFecha = [];
 
 if ($usuarioAutenticado && $conn) {
     $miIdEmpleado = $usuarioData['Id_Empleado'];
@@ -222,315 +241,396 @@ if ($usuarioAutenticado && $conn) {
         'Friday' => ['desayunos' => 0, 'comidas' => 0, 'total' => 0, 'monto' => 0]
     ];
     
-    $sql = "
-    DECLARE @columns AS NVARCHAR(MAX), @sql AS NVARCHAR(MAX);
-    DECLARE @columnsSum NVARCHAR(MAX);
-
-    SELECT @columns = STRING_AGG(QUOTENAME(CAST(Fecha AS CHAR)), ', ')
-                      WITHIN GROUP (ORDER BY Fecha ASC)
+    // 1. PRIMERO: Obtener los tipos de comida desde la tabla Entradas (lo que realmente consumió)
+    $sqlEntradas = "
+    SELECT 
+        CONVERT(VARCHAR(10), CONVERT(DATE, Hora_Entrada, 105), 23) AS Fecha,
+        CASE
+            WHEN CAST(Fecha AS TIME) < '12:00:00' THEN 'Desayuno'
+            ELSE 'Comida'
+        END AS Tipo_Comida
     FROM (
-        SELECT DISTINCT CAST(Fecha AS date) as Fecha
+        SELECT *, 
+            NE_EXTRAIDO1 =
+                CASE 
+                    WHEN Nombre LIKE '%dionisio%' THEN '46'
+                    WHEN Nombre LIKE '%esquivel edgar%' OR Nombre LIKE '%edgar gutie%' OR Nombre LIKE '%GUTIERREZ EZQUIVEL%' THEN '18'
+                    WHEN Nombre LIKE '%Luna castro%' THEN '1'
+                    ELSE NE_Extraido
+                END
         FROM (
-            SELECT 
-                CAST(Fecha_Dia AS DATE) AS Fecha,
-                Id_Empleado,
-                Nombre,
-                Tipo_Comida
-            FROM (
-                SELECT 
-                    Id_Empleado,
-                    Usuario,
-                    Fecha AS Fecha_Base,
-                    Dia,
-                    DATEADD(DAY,
-                            CASE Dia
-                                WHEN 'Lunes' THEN 0
-                                WHEN 'Martes' THEN 1
-                                WHEN 'Miercoles' THEN 2
-                                WHEN 'Jueves' THEN 3
-                                WHEN 'Viernes' THEN 4
-                            END
-                            - (DATEPART(WEEKDAY, Fecha) + @@DATEFIRST - 2) % 7
-                        , Fecha) AS Fecha_Dia,
-                    Tipo_Comida,
-                    Costo
-                FROM PedidosComida
-                CROSS APPLY (
-                    VALUES 
-                        ('Lunes', Lunes),
-                        ('Martes', Martes),
-                        ('Miercoles', Miercoles),
-                        ('Jueves', Jueves),
-                        ('Viernes', Viernes)
-                ) AS unpivoted(Dia, Tipo_Comida)
-            ) AS e1
-            RIGHT JOIN
-                (SELECT Id_Empleado AS Id_Empleado2, Nombre FROM ConPed) AS e2
-            ON e1.Id_Empleado = e2.Id_Empleado2
-        ) AS E4
-        WHERE CAST(Fecha AS CHAR) >= '$fechaInicio' AND CAST(Fecha AS CHAR) <= '$fechaFin'
-    ) AS FechaList;
-
-    SELECT @columnsSum = STRING_AGG('ISNULL(' + TRIM(value) + ', 0)', ' + ')
-    FROM STRING_SPLIT(REPLACE(@columns, ' ', ''), ',');
-
-    SET @sql = N'
-    ;WITH EntradasCTE AS (
-        SELECT Empleado, Nombre, Total FROM (
-            SELECT No_Empleado AS Empleado, Nombre, COUNT(*) AS Total FROM (
-                SELECT 
-                    Fecha1,
-                    NE_EXTRAIDO1 AS No_Empleado,
-                    c.Nombre,
-                    Tipo_Comida
-                FROM (
-                    SELECT *, 
-                        NE_EXTRAIDO1 =
-                            CASE 
-                                WHEN Nombre LIKE ''%dionisio%'' THEN ''46''
-                                WHEN Nombre LIKE ''%esquivel edgar%'' OR Nombre LIKE ''%edgar gutie%'' OR Nombre LIKE ''%GUTIERREZ EZQUIVEL%'' THEN ''18''
-                                WHEN Nombre LIKE ''%Luna castro%'' THEN ''1''
-                                ELSE NE_Extraido
-                            END
-                    FROM (
-                        SELECT *,
-                            LTRIM(RTRIM(
+            SELECT *,
+                LTRIM(RTRIM(
+                    CASE
+                        WHEN CHARINDEX('N.E:', Nombre) > 0 THEN
+                            SUBSTRING(
+                                Nombre,
+                                CHARINDEX('N.E:', Nombre) + LEN('N.E:'), 
                                 CASE
-                                    WHEN CHARINDEX(''N.E:'', Nombre) > 0 THEN
-                                        SUBSTRING(
-                                            Nombre,
-                                            CHARINDEX(''N.E:'', Nombre) + LEN(''N.E:''), 
-                                            CASE
-                                                WHEN CHARINDEX(''DEPARTAMENTO'', Nombre, CHARINDEX(''N.E:'', Nombre)) > 0 THEN
-                                                    CHARINDEX(''DEPARTAMENTO'', Nombre, CHARINDEX(''N.E:'', Nombre)) - (CHARINDEX(''N.E:'', Nombre) + LEN(''N.E:'')) 
-                                                ELSE LEN(Nombre)
-                                            END
-                                        )
-                                    WHEN CHARINDEX(''NE: '', Nombre) > 0 THEN
-                                        SUBSTRING(
-                                            Nombre,
-                                            CHARINDEX(''NE: '', Nombre) + LEN(''NE: ''), 
-                                            CASE
-                                                WHEN CHARINDEX(''DEPARTAMENTO'', Nombre, CHARINDEX(''NE: '', Nombre)) > 0 THEN
-                                                    CHARINDEX(''DEPARTAMENTO'', Nombre, CHARINDEX(''NE: '', Nombre)) - (CHARINDEX(''NE: '', Nombre) + LEN(''NE: ''))
-                                                ELSE LEN(Nombre)
-                                            END
-                                        )
-                                    WHEN CHARINDEX(''NE:'', Nombre) > 0 THEN
-                                        SUBSTRING(
-                                            Nombre,
-                                            CHARINDEX(''NE:'', Nombre) + LEN(''NE:''), 
-                                            CASE
-                                                WHEN CHARINDEX(''DEPARTAMENTO'', Nombre, CHARINDEX(''NE:'', Nombre)) > 0 THEN
-                                                    CHARINDEX(''DEPARTAMENTO'', Nombre, CHARINDEX(''NE:'', Nombre)) - (CHARINDEX(''NE:'', Nombre) + LEN(''NE:'')) 
-                                                ELSE LEN(Nombre)
-                                            END
-                                        )
-                                    WHEN CHARINDEX(''ID:NE0'', Nombre) > 0 THEN
-                                        SUBSTRING(
-                                            Nombre,
-                                            CHARINDEX(''ID:NE0'', Nombre) + LEN(''ID:NE0''), 
-                                            CASE
-                                                WHEN CHARINDEX(''DEPARTAMENTO'', Nombre, CHARINDEX(''ID:NE0'', Nombre)) > 0 THEN
-                                                    CHARINDEX(''DEPARTAMENTO'', Nombre, CHARINDEX(''ID:NE0'', Nombre)) - (CHARINDEX(''ID:NE0'', Nombre) + LEN(''ID:NE0'')) 
-                                                ELSE LEN(Nombre)
-                                            END
-                                        )
-                                    ELSE NULL
+                                    WHEN CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('N.E:', Nombre)) > 0 THEN
+                                        CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('N.E:', Nombre)) - (CHARINDEX('N.E:', Nombre) + LEN('N.E:')) 
+                                    ELSE LEN(Nombre)
                                 END
-                            )) AS NE_Extraido,
-                            CASE
-                                WHEN CAST(Fecha AS TIME) < ''12:00:00'' THEN ''Desayuno''
-                                ELSE ''Comida''
-                            END AS Tipo_Comida,
-                            CONVERT(VARCHAR(10), CONVERT(DATE, Hora_Entrada, 105), 23) AS Fecha1
-                        FROM Entradas
-                        WHERE Nombre LIKE ''%N.E:%'' OR Nombre LIKE ''%NE:%'' OR Nombre LIKE ''%ID:NE0%''
-                    ) AS a
-                ) AS b
-                LEFT JOIN (SELECT Id_Empleado, Nombre FROM ConPed) AS c ON b.NE_EXTRAIDO1 = c.Id_Empleado
-                WHERE LTRIM(RTRIM(Fecha1)) >= ''$fechaInicio'' AND LTRIM(RTRIM(Fecha1)) <= ''$fechaFin''
-            ) AS tt1
-            GROUP BY No_Empleado, Nombre
-        ) AS tt3
-    )
-
-    SELECT pvt.Id_Empleado, pvt.Nombre, ' + @columns + ',
-           ' + @columnsSum + ' AS TotalConsumos,
-           ISNULL(e.Empleado, pvt.Id_Empleado) AS Empleado,
-           ISNULL(e.Nombre, pvt.Nombre) AS NombreEntradas,
-           ISNULL(e.Total, 0) AS TotalEntradas
-    FROM (
-        SELECT 
-            CAST(Fecha AS CHAR) AS fecha,
-            Id_Empleado,
-            Nombre,
-            Tipo_Comida = CASE WHEN Tipo_Comida = '''' THEN 0 ELSE 1 END
-        FROM (
-            SELECT 
-                CAST(Fecha_Dia AS DATE) AS Fecha,
-                Id_Empleado,
-                Nombre,
-                Tipo_Comida
-            FROM (
-                SELECT * FROM (
-                    SELECT 
-                        Id_Empleado,
-                        Usuario,
-                        Fecha AS Fecha_Base,
-                        Dia,
-                        DATEADD(DAY,
-                                CASE Dia
-                                    WHEN ''Lunes'' THEN 0
-                                    WHEN ''Martes'' THEN 1
-                                    WHEN ''Miercoles'' THEN 2
-                                    WHEN ''Jueves'' THEN 3
-                                    WHEN ''Viernes'' THEN 4
+                            )
+                        WHEN CHARINDEX('NE: ', Nombre) > 0 THEN
+                            SUBSTRING(
+                                Nombre,
+                                CHARINDEX('NE: ', Nombre) + LEN('NE: '), 
+                                CASE
+                                    WHEN CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('NE: ', Nombre)) > 0 THEN
+                                        CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('NE: ', Nombre)) - (CHARINDEX('NE: ', Nombre) + LEN('NE: '))
+                                    ELSE LEN(Nombre)
                                 END
-                                - (DATEPART(WEEKDAY, Fecha) + @@DATEFIRST - 2) % 7
-                            , Fecha) AS Fecha_Dia,
-                        Tipo_Comida,
-                        Costo
-                    FROM PedidosComida
-                    CROSS APPLY (
-                        VALUES
-                            (''Lunes'', Lunes),
-                            (''Martes'', Martes),
-                            (''Miercoles'', Miercoles),
-                            (''Jueves'', Jueves),
-                            (''Viernes'', Viernes)
-                    ) AS unpivoted(Dia, Tipo_Comida)
-                ) AS e1
-                RIGHT JOIN
-                    (SELECT Id_Empleado AS Id_Empleado2, Nombre FROM ConPed) AS e2
-                ON e1.Id_Empleado = e2.Id_Empleado2
-            ) AS E4
-        ) AS E5
-        WHERE CAST(Fecha AS CHAR) >= ''$fechaInicio'' AND CAST(Fecha AS CHAR) <= ''$fechaFin''
-    ) AS SourceTable
-    PIVOT (
-        SUM(Tipo_Comida)
-        FOR fecha IN (' + @columns + ')
-    ) AS pvt
-    LEFT JOIN EntradasCTE e ON pvt.Id_Empleado = e.Empleado
-    ORDER BY pvt.Id_Empleado;
-    ';
-
-    EXEC sp_executesql @sql;
+                            )
+                        WHEN CHARINDEX('NE:', Nombre) > 0 THEN
+                            SUBSTRING(
+                                Nombre,
+                                CHARINDEX('NE:', Nombre) + LEN('NE:'), 
+                                CASE
+                                    WHEN CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('NE:', Nombre)) > 0 THEN
+                                        CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('NE:', Nombre)) - (CHARINDEX('NE:', Nombre) + LEN('NE:')) 
+                                    ELSE LEN(Nombre)
+                                END
+                            )
+                        WHEN CHARINDEX('ID:NE0', Nombre) > 0 THEN
+                            SUBSTRING(
+                                Nombre,
+                                CHARINDEX('ID:NE0', Nombre) + LEN('ID:NE0'), 
+                                CASE
+                                    WHEN CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('ID:NE0', Nombre)) > 0 THEN
+                                        CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('ID:NE0', Nombre)) - (CHARINDEX('ID:NE0', Nombre) + LEN('ID:NE0')) 
+                                    ELSE LEN(Nombre)
+                                END
+                            )
+                        ELSE NULL
+                    END
+                )) AS NE_Extraido,
+                CONVERT(VARCHAR(10), CONVERT(DATE, Hora_Entrada, 105), 23) AS Fecha1
+            FROM Entradas
+            WHERE Nombre LIKE '%N.E:%' OR Nombre LIKE '%NE:%' OR Nombre LIKE '%ID:NE0%'
+        ) AS a
+    ) AS b
+    LEFT JOIN (SELECT Id_Empleado, Nombre FROM ConPed) AS c ON b.NE_EXTRAIDO1 = c.Id_Empleado
+    WHERE NE_EXTRAIDO1 = ?
+    AND LTRIM(RTRIM(Fecha1)) >= ? 
+    AND LTRIM(RTRIM(Fecha1)) <= ?
+    ORDER BY Fecha, Tipo_Comida
     ";
     
-    $stmt = sqlsrv_query($conn, $sql);
+    $paramsEntradas = array($miIdEmpleado, $fechaInicio, $fechaFin);
+    $stmtEntradas = sqlsrv_query($conn, $sqlEntradas, $paramsEntradas);
     
-    if ($stmt) {
-        $allFechas = [];
-        
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            if ($row['Id_Empleado'] == $miIdEmpleado || $row['Nombre'] == $miNombre) {
-                $reporteData[] = $row;
-                $miFilaData = $row;
-                
-                $consumosEnEstaFila = 0;
-                $misEntradas = intval($row['TotalEntradas'] ?? 0);
-                
-                foreach ($row as $campo => $valor) {
-                    $esFecha = false;
-                    $fechaNormalizada = '';
-                    
-                    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $campo)) {
-                        $esFecha = true;
-                        $fechaNormalizada = $campo;
-                    } elseif (preg_match('/^\d{4}\/\d{2}\/\d{2}$/', $campo)) {
-                        $esFecha = true;
-                        $fechaNormalizada = str_replace('/', '-', $campo);
-                    } elseif (strpos($campo, '202') === 0) {
-                        $esFecha = true;
-                        $fechaNormalizada = date('Y-m-d', strtotime($campo));
-                    }
-                    
-                    if ($esFecha && $fechaNormalizada && $fechaNormalizada >= $fechaInicio && $fechaNormalizada <= $fechaFin) {
-                        $allFechas[$fechaNormalizada] = $campo;
-                        
-                        $tieneConsumo = false;
-                        $cantidadConsumos = 0;
-                        
-                        if ($valor === 1 || $valor === '1' || $valor === true) {
-                            $tieneConsumo = true;
-                            $cantidadConsumos = 1;
-                        } elseif (is_numeric($valor) && floatval($valor) > 0) {
-                            $tieneConsumo = true;
-                            $cantidadConsumos = intval($valor);
-                        }
-                        
-                        if ($tieneConsumo) {
-                            $consumosEnEstaFila += $cantidadConsumos;
-                            
-                            $tieneEntradaEstaFecha = ($misEntradas > 0);
-                            $costoCalculado = calcularCostoConsumo($fechaNormalizada, $cantidadConsumos, $tieneEntradaEstaFecha);
-                            $montoEntradaCalculado = calcularMontoEntradas($fechaNormalizada, $cantidadConsumos);
-                            
-                            $diaSemanaIngles = date('l', strtotime($fechaNormalizada));
-                            
-                            if (isset($consumosPorDia[$diaSemanaIngles])) {
-                                $consumosPorDia[$diaSemanaIngles] += $cantidadConsumos;
-                                $detalleConsumosPorDia[$diaSemanaIngles]['monto'] += $costoCalculado['costo_total'];
-                                
-                                if ($cantidadConsumos == 2) {
-                                    $detalleConsumosPorDia[$diaSemanaIngles]['desayunos'] += 1;
-                                    $detalleConsumosPorDia[$diaSemanaIngles]['comidas'] += 1;
-                                    $detalleConsumosPorDia[$diaSemanaIngles]['total'] += 2;
-                                } else {
-                                    $detalleConsumosPorDia[$diaSemanaIngles]['comidas'] += $cantidadConsumos;
-                                    $detalleConsumosPorDia[$diaSemanaIngles]['total'] += $cantidadConsumos;
-                                }
-                            }
-                            
-                            $consumosDiarios[$fechaNormalizada] = [
-                                'fecha' => $fechaNormalizada,
-                                'dia_semana' => $diaSemanaIngles,
-                                'consumo' => true,
-                                'cantidad' => $cantidadConsumos,
-                                'costo_calculado' => $costoCalculado,
-                                'tiene_entrada' => $tieneEntradaEstaFecha,
-                                'monto' => $costoCalculado['costo_total'],
-                                'monto_entrada' => $montoEntradaCalculado,
-                                'campo_original' => $campo,
-                                'valor_original' => $valor
-                            ];
-                            
-                            $diasConConsumo++;
-                        }
-                    }
-                }
-                
-                $totalConsumos += $consumosEnEstaFila;
-                $totalEntradas += intval($row['TotalEntradas'] ?? 0);
+    if ($stmtEntradas) {
+        while ($row = sqlsrv_fetch_array($stmtEntradas, SQLSRV_FETCH_ASSOC)) {
+            $fecha = $row['Fecha'];
+            $tipoComida = $row['Tipo_Comida'];
+            
+            if (!isset($tiposComidaPorFecha[$fecha])) {
+                $tiposComidaPorFecha[$fecha] = [];
             }
+            $tiposComidaPorFecha[$fecha][] = $tipoComida;
+        }
+        sqlsrv_free_stmt($stmtEntradas);
+    }
+    
+    // 2. SEGUNDO: Obtener los consumos agendados desde PedidosComida (lo que tenía programado)
+    $sqlAgendados = "
+    SELECT 
+        Fecha_Dia AS Fecha,
+        Tipo_Comida,
+        Costo
+    FROM (
+        SELECT 
+            Id_Empleado,
+            Usuario,
+            Fecha AS Fecha_Base,
+            Dia,
+            DATEADD(DAY,
+                    CASE Dia
+                        WHEN 'Lunes' THEN 0
+                        WHEN 'Martes' THEN 1
+                        WHEN 'Miercoles' THEN 2
+                        WHEN 'Jueves' THEN 3
+                        WHEN 'Viernes' THEN 4
+                    END
+                    - (DATEPART(WEEKDAY, Fecha) + @@DATEFIRST - 2) % 7
+                , Fecha) AS Fecha_Dia,
+            Tipo_Comida,
+            Costo
+        FROM PedidosComida
+        CROSS APPLY (
+            VALUES 
+                ('Lunes', Lunes),
+                ('Martes', Martes),
+                ('Miercoles', Miercoles),
+                ('Jueves', Jueves),
+                ('Viernes', Viernes)
+        ) AS unpivoted(Dia, Tipo_Comida)
+    ) AS e1
+    WHERE Id_Empleado = ?
+    AND Fecha_Dia >= ?
+    AND Fecha_Dia <= ?
+    AND Tipo_Comida != ''
+    ORDER BY Fecha_Dia
+    ";
+    
+    $paramsAgendados = array($miIdEmpleado, $fechaInicio, $fechaFin);
+    $stmtAgendados = sqlsrv_query($conn, $sqlAgendados, $paramsAgendados);
+    
+    if ($stmtAgendados) {
+        while ($row = sqlsrv_fetch_array($stmtAgendados, SQLSRV_FETCH_ASSOC)) {
+            $fecha = $row['Fecha']->format('Y-m-d');
+            $tipoComida = $row['Tipo_Comida'];
+            
+            if (!isset($consumosAgendadosPorFecha[$fecha])) {
+                $consumosAgendadosPorFecha[$fecha] = [];
+            }
+            $consumosAgendadosPorFecha[$fecha][] = $tipoComida;
+        }
+        sqlsrv_free_stmt($stmtAgendados);
+    }
+    
+    // 3. OBTENER TODAS LAS FECHAS CON ENTRADAS (aunque no tengan agendado)
+    $sqlFechasConEntrada = "
+    SELECT DISTINCT CONVERT(VARCHAR(10), CONVERT(DATE, Hora_Entrada, 105), 23) AS Fecha
+    FROM (
+        SELECT *, 
+            NE_EXTRAIDO1 =
+                CASE 
+                    WHEN Nombre LIKE '%dionisio%' THEN '46'
+                    WHEN Nombre LIKE '%esquivel edgar%' OR Nombre LIKE '%edgar gutie%' OR Nombre LIKE '%GUTIERREZ EZQUIVEL%' THEN '18'
+                    WHEN Nombre LIKE '%Luna castro%' THEN '1'
+                    ELSE NE_Extraido
+                END
+        FROM (
+            SELECT *,
+                LTRIM(RTRIM(
+                    CASE
+                        WHEN CHARINDEX('N.E:', Nombre) > 0 THEN
+                            SUBSTRING(
+                                Nombre,
+                                CHARINDEX('N.E:', Nombre) + LEN('N.E:'), 
+                                CASE
+                                    WHEN CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('N.E:', Nombre)) > 0 THEN
+                                        CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('N.E:', Nombre)) - (CHARINDEX('N.E:', Nombre) + LEN('N.E:')) 
+                                    ELSE LEN(Nombre)
+                                END
+                            )
+                        WHEN CHARINDEX('NE: ', Nombre) > 0 THEN
+                            SUBSTRING(
+                                Nombre,
+                                CHARINDEX('NE: ', Nombre) + LEN('NE: '), 
+                                CASE
+                                    WHEN CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('NE: ', Nombre)) > 0 THEN
+                                        CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('NE: ', Nombre)) - (CHARINDEX('NE: ', Nombre) + LEN('NE: '))
+                                    ELSE LEN(Nombre)
+                                END
+                            )
+                        WHEN CHARINDEX('NE:', Nombre) > 0 THEN
+                            SUBSTRING(
+                                Nombre,
+                                CHARINDEX('NE:', Nombre) + LEN('NE:'), 
+                                CASE
+                                    WHEN CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('NE:', Nombre)) > 0 THEN
+                                        CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('NE:', Nombre)) - (CHARINDEX('NE:', Nombre) + LEN('NE:')) 
+                                    ELSE LEN(Nombre)
+                                END
+                            )
+                        WHEN CHARINDEX('ID:NE0', Nombre) > 0 THEN
+                            SUBSTRING(
+                                Nombre,
+                                CHARINDEX('ID:NE0', Nombre) + LEN('ID:NE0'), 
+                                CASE
+                                    WHEN CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('ID:NE0', Nombre)) > 0 THEN
+                                        CHARINDEX('DEPARTAMENTO', Nombre, CHARINDEX('ID:NE0', Nombre)) - (CHARINDEX('ID:NE0', Nombre) + LEN('ID:NE0')) 
+                                    ELSE LEN(Nombre)
+                                END
+                            )
+                        ELSE NULL
+                    END
+                )) AS NE_Extraido,
+                CONVERT(VARCHAR(10), CONVERT(DATE, Hora_Entrada, 105), 23) AS Fecha1
+            FROM Entradas
+            WHERE Nombre LIKE '%N.E:%' OR Nombre LIKE '%NE:%' OR Nombre LIKE '%ID:NE0%'
+        ) AS a
+    ) AS b
+    LEFT JOIN (SELECT Id_Empleado, Nombre FROM ConPed) AS c ON b.NE_EXTRAIDO1 = c.Id_Empleado
+    WHERE NE_EXTRAIDO1 = ?
+    AND LTRIM(RTRIM(Fecha1)) >= ? 
+    AND LTRIM(RTRIM(Fecha1)) <= ?
+    ORDER BY Fecha
+    ";
+    
+    $paramsFechasEntrada = array($miIdEmpleado, $fechaInicio, $fechaFin);
+    $stmtFechasEntrada = sqlsrv_query($conn, $sqlFechasConEntrada, $paramsFechasEntrada);
+    
+    $fechasConEntrada = [];
+    if ($stmtFechasEntrada) {
+        while ($row = sqlsrv_fetch_array($stmtFechasEntrada, SQLSRV_FETCH_ASSOC)) {
+            $fecha = $row['Fecha'];
+            $fechasConEntrada[] = $fecha;
+        }
+        sqlsrv_free_stmt($stmtFechasEntrada);
+    }
+    
+    // 4. COMBINAR TODAS LAS FECHAS: las que tienen agendado + las que tienen entrada
+    $todasFechas = array_unique(array_merge(
+        array_keys($consumosAgendadosPorFecha),
+        $fechasConEntrada
+    ));
+    
+    // Ordenar fechas
+    sort($todasFechas);
+    
+    // Procesar cada fecha para determinar consumo
+    foreach ($todasFechas as $fecha) {
+        $year = date('Y', strtotime($fecha));
+        $diaSemanaIngles = date('l', strtotime($fecha));
+        
+        // Verificar si tenía agendado consumir este día
+        $teniaAgendado = isset($consumosAgendadosPorFecha[$fecha]) && !empty($consumosAgendadosPorFecha[$fecha]);
+        
+        // Verificar qué tipo(s) de comida tomó
+        $tiposTomados = $tiposComidaPorFecha[$fecha] ?? [];
+        $tomoDesayuno = in_array('Desayuno', $tiposTomados);
+        $tomoComida = in_array('Comida', $tiposTomados);
+        $tomoAlgo = $tomoDesayuno || $tomoComida;
+        
+        // Determinar tipo de comida para cálculos
+        $tipoComidaCalculo = '';
+        $cantidadConsumos = 0;
+        
+        if ($tomoDesayuno && $tomoComida) {
+            $tipoComidaCalculo = 'Ambos';
+            $cantidadConsumos = 2;
+        } elseif ($tomoDesayuno) {
+            $tipoComidaCalculo = 'Desayuno';
+            $cantidadConsumos = 1;
+        } elseif ($tomoComida) {
+            $tipoComidaCalculo = 'Comida';
+            $cantidadConsumos = 1;
+        } else {
+            $tipoComidaCalculo = 'Ninguno';
+            $cantidadConsumos = 0;
         }
         
-        // Calcular montos totales
-        $montoTotal = 0;
-        $montoEntradas = 0;
+        // Si tomó algo, siempre se registra en el reporte (aunque no tenga agendado)
+        if ($tomoAlgo) {
+            $tieneEntrada = true; // Si tomó, significa que tuvo entrada
+            
+            $costoCalculado = calcularCostoConsumo($fecha, $tipoComidaCalculo, $tieneEntrada, $year);
+            $montoEntradaCalculado = calcularMontoEntradas($fecha, $tipoComidaCalculo, $year);
+            
+            // Actualizar estadísticas
+            if (isset($consumosPorDia[$diaSemanaIngles])) {
+                $consumosPorDia[$diaSemanaIngles] += $cantidadConsumos;
+                $detalleConsumosPorDia[$diaSemanaIngles]['monto'] += $costoCalculado['costo_total'];
+                
+                if ($tomoDesayuno) {
+                    $detalleConsumosPorDia[$diaSemanaIngles]['desayunos'] += 1;
+                    $detalleConsumosPorDia[$diaSemanaIngles]['total'] += 1;
+                }
+                if ($tomoComida) {
+                    $detalleConsumosPorDia[$diaSemanaIngles]['comidas'] += 1;
+                    $detalleConsumosPorDia[$diaSemanaIngles]['total'] += 1;
+                }
+            }
+            
+            $consumosDiarios[$fecha] = [
+                'fecha' => $fecha,
+                'dia_semana' => $diaSemanaIngles,
+                'consumo' => true,
+                'tenia_agendado' => $teniaAgendado,
+                'tomo_algo' => $tomoAlgo,
+                'cantidad' => $cantidadConsumos,
+                'tomo_desayuno' => $tomoDesayuno,
+                'tomo_comida' => $tomoComida,
+                'tipos_tomados' => $tiposTomados,
+                'tipos_agendados' => $consumosAgendadosPorFecha[$fecha] ?? [],
+                'tipo_calculo' => $tipoComidaCalculo,
+                'costo_calculado' => $costoCalculado,
+                'tiene_entrada' => $tieneEntrada,
+                'monto' => $costoCalculado['costo_total'],
+                'monto_entrada' => $montoEntradaCalculado,
+                'year' => $year
+            ];
+            
+            $totalConsumos += $cantidadConsumos;
+            $diasConConsumo++;
+            
+        } elseif ($teniaAgendado && !$tomoAlgo) {
+            // Tenía agendado pero NO tomó - esto es importante para mostrar
+            $consumosDiarios[$fecha] = [
+                'fecha' => $fecha,
+                'dia_semana' => $diaSemanaIngles,
+                'consumo' => false,
+                'tenia_agendado' => $teniaAgendado,
+                'tomo_algo' => $tomoAlgo,
+                'cantidad' => 0,
+                'tomo_desayuno' => false,
+                'tomo_comida' => false,
+                'tipos_tomados' => [],
+                'tipos_agendados' => $consumosAgendadosPorFecha[$fecha] ?? [],
+                'tipo_calculo' => 'Ninguno',
+                'costo_calculado' => null,
+                'tiene_entrada' => false,
+                'monto' => 0,
+                'monto_entrada' => 0,
+                'year' => $year
+            ];
+        } elseif (!$teniaAgendado && !$tomoAlgo) {
+            // No tenía agendado y no tomó - esto también se debe mostrar
+            $consumosDiarios[$fecha] = [
+                'fecha' => $fecha,
+                'dia_semana' => $diaSemanaIngles,
+                'consumo' => false,
+                'tenia_agendado' => $teniaAgendado,
+                'tomo_algo' => $tomoAlgo,
+                'cantidad' => 0,
+                'tomo_desayuno' => false,
+                'tomo_comida' => false,
+                'tipos_tomados' => [],
+                'tipos_agendados' => $consumosAgendadosPorFecha[$fecha] ?? [],
+                'tipo_calculo' => 'Ninguno',
+                'costo_calculado' => null,
+                'tiene_entrada' => false,
+                'monto' => 0,
+                'monto_entrada' => 0,
+                'year' => $year
+            ];
+        }
         
-        foreach ($consumosDiarios as $consumoDia) {
+        // Contar entradas (días donde tomó algo)
+        if ($tomoAlgo) {
+            $totalEntradas++;
+        }
+    }
+    
+    // Calcular montos totales
+    $montoTotal = 0;
+    $montoEntradas = 0;
+    
+    foreach ($consumosDiarios as $consumoDia) {
+        if ($consumoDia['consumo']) {
             $montoTotal += $consumoDia['monto'];
             $montoEntradas += $consumoDia['monto_entrada'];
         }
-        
-        $debugInfo = [
-            'fecha_inicio' => $fechaInicio,
-            'fecha_fin' => $fechaFin,
-            'usuario' => $miIdEmpleado . ' - ' . $miNombre,
-            'total_consumos' => $totalConsumos,
-            'total_entradas' => $totalEntradas,
-            'monto_total' => $montoTotal,
-            'monto_entradas' => $montoEntradas,
-            'dias_con_consumo' => $diasConConsumo
-        ];
-        
-        sqlsrv_free_stmt($stmt);
-    } else {
-        $errorQuery = "Error en la consulta: " . print_r(sqlsrv_errors(), true);
     }
+    
+    $debugInfo = [
+        'fecha_inicio' => $fechaInicio,
+        'fecha_fin' => $fechaFin,
+        'usuario' => $miIdEmpleado . ' - ' . $miNombre,
+        'total_consumos' => $totalConsumos,
+        'total_entradas' => $totalEntradas,
+        'monto_total' => $montoTotal,
+        'monto_entradas' => $montoEntradas,
+        'dias_con_consumo' => $diasConConsumo,
+        'tipos_comida_por_fecha' => $tiposComidaPorFecha,
+        'consumos_agendados_por_fecha' => $consumosAgendadosPorFecha,
+        'fechas_con_entrada' => $fechasConEntrada,
+        'todas_fechas' => $todasFechas
+    ];
 }
 
 // Cerrar conexión
@@ -557,6 +657,8 @@ if (isset($conn)) {
             --info: #17a2b8;
             --danger: #dc3545;
             --dark-red: #8b0000;
+            --purple: #6f42c1;
+            --orange: #fd7e14;
         }
         
         body {
@@ -665,8 +767,19 @@ if (isset($conn)) {
             font-weight: bold;
         }
         
-        .multi-consumo {
+        .desayuno-cell {
+            background: rgba(23, 162, 184, 0.3);
+            font-weight: bold;
+        }
+        
+        .comida-cell {
+            background: rgba(40, 167, 69, 0.3);
+            font-weight: bold;
+        }
+        
+        .ambos-cell {
             background: rgba(255, 193, 7, 0.3);
+            font-weight: bold;
         }
         
         .sin-consumo-cell {
@@ -678,9 +791,19 @@ if (isset($conn)) {
             background: rgba(220, 53, 69, 0.4);
         }
         
+        .agendado-no-tomado {
+            background: rgba(111, 66, 193, 0.3);
+            border: 1px solid var(--purple);
+        }
+        
         .sin-entrada {
             background: rgba(139, 0, 0, 0.3);
             border: 1px solid var(--dark-red);
+        }
+        
+        .consumo-sin-agendado {
+            background: rgba(253, 126, 20, 0.3);
+            border: 1px solid var(--orange);
         }
         
         .badge-consumo {
@@ -723,8 +846,16 @@ if (isset($conn)) {
             border-radius: 10px;
         }
         
-        .badge-rojo {
-            background: var(--danger);
+        .badge-agendado {
+            background: var(--purple);
+            color: white;
+            font-size: 0.7rem;
+            padding: 3px 6px;
+            border-radius: 8px;
+        }
+        
+        .badge-sin-agendado {
+            background: var(--orange);
             color: white;
             font-size: 0.7rem;
             padding: 3px 6px;
@@ -885,6 +1016,18 @@ if (isset($conn)) {
             font-weight: bold;
             font-size: 0.8rem;
         }
+        
+        .agendado-text {
+            color: var(--purple);
+            font-weight: bold;
+            font-size: 0.8rem;
+        }
+        
+        .sin-agendado-text {
+            color: var(--orange);
+            font-weight: bold;
+            font-size: 0.8rem;
+        }
     </style>
 </head>
 <body>
@@ -976,6 +1119,48 @@ if (isset($conn)) {
                         <strong>Usuario:</strong><br>
                         <?php echo $debugInfo['usuario']; ?>
                     </div>
+                    <div class="col-12 mt-3">
+                        <strong>Fechas con entrada detectadas:</strong><br>
+                        <pre style="color: white; font-size: 0.8rem; margin: 0; max-height: 200px; overflow: auto;">
+<?php 
+if (!empty($debugInfo['fechas_con_entrada'])) {
+    foreach ($debugInfo['fechas_con_entrada'] as $fecha) {
+        echo htmlspecialchars($fecha) . "\n";
+    }
+} else {
+    echo "No se encontraron fechas con entrada.";
+}
+?>
+                        </pre>
+                    </div>
+                    <div class="col-12 mt-3">
+                        <strong>Tipos de comida detectados (Entradas):</strong><br>
+                        <pre style="color: white; font-size: 0.8rem; margin: 0; max-height: 200px; overflow: auto;">
+<?php 
+if (!empty($debugInfo['tipos_comida_por_fecha'])) {
+    foreach ($debugInfo['tipos_comida_por_fecha'] as $fecha => $tipos) {
+        echo htmlspecialchars($fecha) . ": " . implode(", ", $tipos) . "\n";
+    }
+} else {
+    echo "No se encontraron registros de tipos de comida en Entradas.";
+}
+?>
+                        </pre>
+                    </div>
+                    <div class="col-12 mt-3">
+                        <strong>Consumos agendados (PedidosComida):</strong><br>
+                        <pre style="color: white; font-size: 0.8rem; margin: 0; max-height: 200px; overflow: auto;">
+<?php 
+if (!empty($debugInfo['consumos_agendados_por_fecha'])) {
+    foreach ($debugInfo['consumos_agendados_por_fecha'] as $fecha => $tipos) {
+        echo htmlspecialchars($fecha) . ": " . implode(", ", $tipos) . "\n";
+    }
+} else {
+    echo "No se encontraron consumos agendados en PedidosComida.";
+}
+?>
+                        </pre>
+                    </div>
                 </div>
             </div>
             <?php endif; ?>
@@ -1006,8 +1191,8 @@ if (isset($conn)) {
                 <div class="col-6 col-md-3 mb-2">
                     <div class="stat-card">
                         <div class="stat-number"><?php echo $totalConsumos; ?></div>
-                        <div>Consumos</div>
-                        <div class="stat-subtitle"><?php echo $diasConConsumo; ?> días</div>
+                        <div>Consumos Tomados</div>
+                        <div class="stat-subtitle"><?php echo $diasConConsumo; ?> días con consumo</div>
                     </div>
                 </div>
                 <div class="col-6 col-md-3 mb-2">
@@ -1019,10 +1204,12 @@ if (isset($conn)) {
                             $antes2026 = 0;
                             $desde2026 = 0;
                             foreach ($consumosDiarios as $consumo) {
-                                if ($consumo['costo_calculado']['year'] < 2026) {
-                                    $antes2026 += $consumo['monto'];
-                                } else {
-                                    $desde2026 += $consumo['monto'];
+                                if ($consumo['consumo']) {
+                                    if ($consumo['year'] < 2026) {
+                                        $antes2026 += $consumo['monto'];
+                                    } else {
+                                        $desde2026 += $consumo['monto'];
+                                    }
                                 }
                             }
                             if ($antes2026 > 0): ?>
@@ -1043,9 +1230,9 @@ if (isset($conn)) {
                 </div>
                 <div class="col-6 col-md-3 mb-2">
                     <div class="stat-card">
-                        <div class="stat-number"><?php echo count($consumosDiarios); ?></div>
-                        <div>Días</div>
-                        <div class="stat-subtitle">Con consumo</div>
+                        <div class="stat-number"><?php echo $totalEntradas; ?></div>
+                        <div>Días con Entrada</div>
+                        <div class="stat-subtitle">Registradas en sistema</div>
                     </div>
                 </div>
             </div>
@@ -1053,16 +1240,21 @@ if (isset($conn)) {
             <!-- POLÍTICA DE PRECIOS -->
             <div class="glass-card mb-3" style="background: rgba(255, 193, 7, 0.1);">
                 <div class="row">
-                    <div class="col-md-6">
-                        <strong><i class="fas fa-money-bill-wave"></i> Política de Precios:</strong><br>
+                    <div class="col-md-8">
+                        <strong><i class="fas fa-money-bill-wave"></i> Política de Precios y Colores:</strong><br>
                         <small>
                             <strong>Antes 2026:</strong> Todos los consumos: $30<br>
                             <strong>2026+:</strong> Desayuno: $35, Comida: $45<br>
-                            <strong>Monto Entradas:</strong> Precio con descuento aplicado<br>
-                            <strong>Rojo:</strong> Día sin consumo registrado
+                            <strong>Colores:</strong> 
+                            <span class="badge-desayuno me-1">Desayuno</span>
+                            <span class="badge-comida me-1">Comida</span>
+                            <span class="badge bg-warning me-1">Ambos</span>
+                            <span class="badge-agendado me-1">Agendado No Tomado</span>
+                            <span class="badge-sin-agendado me-1">Consumo Sin Agendado</span><br>
+                            <strong>Rojo:</strong> Día sin consumo agendado y sin entrada
                         </small>
                     </div>
-                    <div class="col-md-6 text-md-end">
+                    <div class="col-md-4 text-md-end">
                         <small class="text-muted">
                             Período: <?php echo date('d/m/Y', strtotime($fechaInicio)); ?> - <?php echo date('d/m/Y', strtotime($fechaFin)); ?>
                         </small>
@@ -1085,7 +1277,13 @@ if (isset($conn)) {
                     </div>
                 </div>
                 
-                <?php if (!empty($reporteData)): ?>
+                <?php if (!empty($consumosDiarios)): ?>
+                    <?php 
+                    // Ordenar las fechas
+                    ksort($consumosDiarios);
+                    $fechasPeriodo = array_keys($consumosDiarios);
+                    ?>
+                    
                     <div class="table-responsive-container position-relative">
                         <table class="table table-custom">
                             <thead>
@@ -1093,22 +1291,7 @@ if (isset($conn)) {
                                     <th>Consumos</th>
                                     <th>Entradas</th>
                                     <th>Monto Entradas</th>
-                                    <?php 
-                                    $fechasPeriodo = [];
-                                    if (!empty($reporteData[0])) {
-                                        foreach ($reporteData[0] as $campo => $valor) {
-                                            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $campo) || 
-                                                preg_match('/^\d{4}\/\d{2}\/\d{2}$/', $campo) ||
-                                                strpos($campo, '202') === 0) {
-                                                $fechasPeriodo[] = $campo;
-                                            }
-                                        }
-                                    }
-                                    usort($fechasPeriodo, function($a, $b) {
-                                        return strtotime($a) - strtotime($b);
-                                    });
-                                    
-                                    foreach ($fechasPeriodo as $fecha): 
+                                    <?php foreach ($fechasPeriodo as $fecha): 
                                         $fechaFormateada = date('d/m', strtotime($fecha));
                                         $diaSemana = date('D', strtotime($fecha));
                                         $year = date('Y', strtotime($fecha));
@@ -1126,98 +1309,140 @@ if (isset($conn)) {
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($reporteData as $fila): ?>
-                                    <?php if ($fila['Id_Empleado'] == $miIdEmpleado || $fila['Nombre'] == $user_name): ?>
-                                        <tr>
-                                            <td class="text-center">
-                                                <span class="badge-total">
-                                                    <?php echo $fila['TotalConsumos'] ?? 0; ?>
-                                                </span>
-                                            </td>
-                                            <td class="text-center">
-                                                <span class="badge bg-info">
-                                                    <?php echo $fila['TotalEntradas'] ?? 0; ?>
-                                                </span>
-                                            </td>
-                                            <td class="text-center">
-                                                <span class="badge bg-success">
-                                                    $<?php echo number_format($montoEntradas, 0); ?>
-                                                </span>
-                                            </td>
-                                            <?php 
-                                            foreach ($fechasPeriodo as $fecha): 
-                                                $valor = $fila[$fecha] ?? 0;
-                                                $tieneConsumo = false;
-                                                $cantidadConsumos = 0;
-                                                
-                                                if ($valor === 1 || $valor === '1' || $valor === true) {
-                                                    $tieneConsumo = true;
-                                                    $cantidadConsumos = 1;
-                                                } elseif (is_numeric($valor) && floatval($valor) > 0) {
-                                                    $tieneConsumo = true;
-                                                    $cantidadConsumos = intval($valor);
+                                <tr>
+                                    <td class="text-center">
+                                        <span class="badge-total">
+                                            <?php echo $totalConsumos; ?>
+                                        </span>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge bg-info">
+                                            <?php echo $totalEntradas; ?>
+                                        </span>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge bg-success">
+                                            $<?php echo number_format($montoEntradas, 0); ?>
+                                        </span>
+                                    </td>
+                                    <?php foreach ($consumosDiarios as $fecha => $consumoDia): 
+                                        $tieneConsumo = $consumoDia['consumo'];
+                                        $teniaAgendado = $consumoDia['tenia_agendado'];
+                                        $tomoAlgo = $consumoDia['tomo_algo'];
+                                        $tomoDesayuno = $consumoDia['tomo_desayuno'];
+                                        $tomoComida = $consumoDia['tomo_comida'];
+                                        $cantidadConsumos = $consumoDia['cantidad'];
+                                        $year = $consumoDia['year'];
+                                        $tieneEntrada = $consumoDia['tiene_entrada'];
+                                        
+                                        // Determinar clase CSS - CORRECCIÓN AQUÍ
+                                        $claseCelda = '';
+                                        if ($tomoAlgo) {
+                                            if ($teniaAgendado) {
+                                                if ($tomoDesayuno && $tomoComida) {
+                                                    $claseCelda = 'ambos-cell';
+                                                } elseif ($tomoDesayuno) {
+                                                    $claseCelda = 'desayuno-cell';
+                                                } elseif ($tomoComida) {
+                                                    $claseCelda = 'comida-cell';
                                                 }
+                                                if (!$tieneEntrada) {
+                                                    $claseCelda .= ' sin-entrada';
+                                                }
+                                            } else {
+                                                // Consumió pero NO tenía agendado
+                                                $claseCelda = 'consumo-sin-agendado';
+                                            }
+                                        } elseif ($teniaAgendado && !$tomoAlgo) {
+                                            $claseCelda = 'agendado-no-tomado';
+                                        } else {
+                                            $claseCelda = 'sin-consumo-cell';
+                                        }
+                                        
+                                        $claseCelda .= $year < 2026 ? ' periodo-2025' : ' periodo-2026';
+                                    ?>
+                                        <td class="text-center <?php echo $claseCelda; ?>" 
+                                            data-bs-toggle="tooltip" 
+                                            data-bs-placement="top"
+                                            title="<?php
+                                                echo "<strong>" . date('d/m/Y', strtotime($fecha)) . "</strong><br>";
+                                                echo "<strong>Estado:</strong> ";
                                                 
-                                                $year = date('Y', strtotime($fecha));
-                                                $tieneEntrada = true;
-                                                $costoInfo = calcularCostoConsumo($fecha, $cantidadConsumos, $tieneEntrada);
-                                                $montoEntradaCalculado = calcularMontoEntradas($fecha, $cantidadConsumos);
-                                            ?>
-                                                <td class="text-center <?php 
-                                                    if ($tieneConsumo) {
-                                                        echo $cantidadConsumos > 1 ? 'multi-consumo' : 'consumo-cell';
-                                                        echo !$tieneEntrada ? ' sin-entrada' : '';
+                                                if ($tomoAlgo) {
+                                                    if ($teniaAgendado) {
+                                                        echo "<span class='text-success'>Consumió (Agendado)</span><br>";
                                                     } else {
-                                                        echo 'sin-consumo-cell';
+                                                        echo "<span class='text-orange'><strong>Consumió SIN agendado</strong></span><br>";
                                                     }
-                                                    echo $year < 2026 ? ' periodo-2025' : ' periodo-2026';
-                                                ?>" data-bs-toggle="tooltip" 
-                                                   data-bs-placement="top"
-                                                   title="<?php
-                                                    if ($tieneConsumo) {
-                                                        echo "<strong>" . date('d/m/Y', strtotime($fecha)) . "</strong><br>";
-                                                        echo "<strong>Consumos:</strong> " . $cantidadConsumos . "<br>";
-                                                        echo "<strong>Costo Total:</strong> $" . $costoInfo['costo_total'] . "<br>";
-                                                        echo "<strong>Monto Entrada:</strong> $" . $montoEntradaCalculado . "<br>";
-                                                        echo "<strong>Año:</strong> " . $year;
-                                                        if ($cantidadConsumos > 1) {
-                                                            echo "<br><strong>Tipo:</strong> Desayuno + Comida";
-                                                        } else {
-                                                            echo "<br><strong>Tipo:</strong> Comida";
-                                                        }
-                                                        if (!$tieneEntrada) {
-                                                            echo "<br><span class='text-danger'><strong>⚠ Sin entrada (Precio doble)</strong></span>";
-                                                        }
-                                                    } else {
-                                                        echo "<strong>" . date('d/m/Y', strtotime($fecha)) . "</strong><br>";
-                                                        echo "<span class='text-danger'><strong>No se tomó consumo este día</strong></span><br>";
-                                                        echo "<strong>Monto Entrada:</strong> $0<br>";
-                                                        echo "<strong>Año:</strong> " . $year;
+                                                    echo "<strong>Tipo(s):</strong> ";
+                                                    $tipos = [];
+                                                    if ($tomoDesayuno) {
+                                                        $precio = $year < 2026 ? "30" : "35";
+                                                        $tipos[] = "Desayuno (\$" . $precio . ")";
                                                     }
-                                                ?>">
-                                                    <?php if ($tieneConsumo): ?>
-                                                        <div class="d-flex flex-column align-items-center">
-                                                            <span class="badge-consumo mb-1">
-                                                                <?php echo $cantidadConsumos; ?>
-                                                            </span>
-                                                            <?php if ($cantidadConsumos > 1): ?>
-                                                                <div class="d-flex gap-1">
-                                                                    <span class="badge-desayuno">D</span>
-                                                                    <span class="badge-comida">C</span>
-                                                                </div>
+                                                    if ($tomoComida) {
+                                                        $precio = $year < 2026 ? "30" : "45";
+                                                        $tipos[] = "Comida (\$" . $precio . ")";
+                                                    }
+                                                    echo implode(" + ", $tipos) . "<br>";
+                                                    echo "<strong>Costo Total:</strong> $" . $consumoDia['monto'] . "<br>";
+                                                    echo "<strong>Monto Entrada:</strong> $" . $consumoDia['monto_entrada'] . "<br>";
+                                                    if (!$tieneEntrada) {
+                                                        echo "<span class='text-danger'><strong>⚠ Sin entrada (Precio doble)</strong></span><br>";
+                                                    }
+                                                } elseif ($teniaAgendado && !$tomoAlgo) {
+                                                    echo "<span class='text-purple'>Agendado pero NO consumió</span><br>";
+                                                    if (!empty($consumoDia['tipos_agendados'])) {
+                                                        echo "<strong>Agendado:</strong> " . implode(", ", $consumoDia['tipos_agendados']) . "<br>";
+                                                    }
+                                                } else {
+                                                    echo "<span class='text-danger'>No tenía agendado y no consumió</span><br>";
+                                                }
+                                                echo "<strong>Año:</strong> " . $year;
+                                            ?>">
+                                            <?php if ($tomoAlgo): ?>
+                                                <div class="d-flex flex-column align-items-center">
+                                                    <span class="badge-consumo mb-1">
+                                                        <?php echo $cantidadConsumos; ?>
+                                                    </span>
+                                                    <div class="d-flex gap-1">
+                                                        <?php if ($tomoDesayuno): ?>
+                                                            <span class="badge-desayuno">D</span>
+                                                        <?php endif; ?>
+                                                        <?php if ($tomoComida): ?>
+                                                            <span class="badge-comida">C</span>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                    <?php if (!$teniaAgendado): ?>
+                                                        <span class="badge-sin-agendado mt-1">Sin Agend.</span>
+                                                    <?php elseif (!$tieneEntrada): ?>
+                                                        <span class="badge-doble mt-1">2×</span>
+                                                    <?php endif; ?>
+                                                </div>
+                                            <?php elseif ($teniaAgendado && !$tomoAlgo): ?>
+                                                <div class="d-flex flex-column align-items-center">
+                                                    <span class="agendado-text">Agend.</span>
+                                                    <?php if (!empty($consumoDia['tipos_agendados'])): ?>
+                                                        <div class="d-flex gap-1 mt-1">
+                                                            <?php 
+                                                            $tieneAgendadoDesayuno = in_array('Desayuno', $consumoDia['tipos_agendados']);
+                                                            $tieneAgendadoComida = in_array('Comida', $consumoDia['tipos_agendados']);
+                                                            ?>
+                                                            <?php if ($tieneAgendadoDesayuno): ?>
+                                                                <span class="badge-desayuno" style="opacity: 0.6;">D</span>
                                                             <?php endif; ?>
-                                                            <?php if (!$tieneEntrada): ?>
-                                                                <span class="badge-doble mt-1">2×</span>
+                                                            <?php if ($tieneAgendadoComida): ?>
+                                                                <span class="badge-comida" style="opacity: 0.6;">C</span>
                                                             <?php endif; ?>
                                                         </div>
-                                                    <?php else: ?>
-                                                        <span class="no-consumo-text">No</span>
                                                     <?php endif; ?>
-                                                </td>
-                                            <?php endforeach; ?>
-                                        </tr>
-                                    <?php endif; ?>
-                                <?php endforeach; ?>
+                                                </div>
+                                            <?php else: ?>
+                                                <span class="no-consumo-text">No</span>
+                                            <?php endif; ?>
+                                        </td>
+                                    <?php endforeach; ?>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -1227,31 +1452,64 @@ if (isset($conn)) {
                         <div class="col-lg-6 mb-4 mb-lg-0">
                             <div class="glass-card">
                                 <h6 class="mb-3"><i class="fas fa-key"></i> Leyenda del Reporte</h6>
-                                <div class="resumen-dia">
+                                <div class="resumen-dia desayuno-cell">
                                     <div class="d-flex align-items-center">
-                                        <div class="consumo-cell me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
-                                            <span class="badge-consumo">1</span>
+                                        <div class="me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <span class="badge-desayuno">D</span>
                                         </div>
                                         <div>
-                                            <strong>Con consumo</strong><br>
-                                            <small class="detalle-consumo">1 consumo registrado</small>
+                                            <strong>Desayuno</strong><br>
+                                            <small class="detalle-consumo">Consumió desayuno (agendado)</small>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="resumen-dia">
+                                <div class="resumen-dia comida-cell">
                                     <div class="d-flex align-items-center">
-                                        <div class="multi-consumo me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
-                                            <div class="d-flex flex-column align-items-center">
-                                                <span class="badge-consumo">2</span>
-                                                <div class="d-flex gap-1 mt-1">
-                                                    <span class="badge-desayuno">D</span>
-                                                    <span class="badge-comida">C</span>
-                                                </div>
+                                        <div class="me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <span class="badge-comida">C</span>
+                                        </div>
+                                        <div>
+                                            <strong>Comida</strong><br>
+                                            <small class="detalle-consumo">Consumió comida (agendado)</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="resumen-dia ambos-cell">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <div class="d-flex gap-1">
+                                                <span class="badge-desayuno">D</span>
+                                                <span class="badge-comida">C</span>
                                             </div>
                                         </div>
                                         <div>
-                                            <strong>Dos consumos</strong><br>
-                                            <small class="detalle-consumo">Desayuno + Comida</small>
+                                            <strong>Desayuno + Comida</strong><br>
+                                            <small class="detalle-consumo">Consumió ambos (agendado)</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="resumen-dia consumo-sin-agendado">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <div class="d-flex flex-column align-items-center">
+                                                <span class="badge-desayuno">D</span>
+                                                <span class="badge-sin-agendado mt-1">Sin Agend.</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <strong>Consumo Sin Agendado</strong><br>
+                                            <small class="detalle-consumo">Consumió pero NO tenía agendado</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="resumen-dia agendado-no-tomado">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
+                                            <span class="agendado-text">Agend.</span>
+                                        </div>
+                                        <div>
+                                            <strong>Agendado No Tomado</strong><br>
+                                            <small class="detalle-consumo">Tenía agendado pero no consumió</small>
                                         </div>
                                     </div>
                                 </div>
@@ -1262,7 +1520,7 @@ if (isset($conn)) {
                                         </div>
                                         <div>
                                             <strong>Sin consumo</strong><br>
-                                            <small class="detalle-consumo">Rojo: día sin consumo registrado</small>
+                                            <small class="detalle-consumo">No tenía agendado y no consumió</small>
                                         </div>
                                     </div>
                                 </div>
@@ -1270,7 +1528,7 @@ if (isset($conn)) {
                                     <div class="d-flex align-items-center">
                                         <div class="sin-entrada me-3" style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;">
                                             <div class="d-flex flex-column align-items-center">
-                                                <span class="badge-consumo">1</span>
+                                                <span class="badge-desayuno">D</span>
                                                 <span class="badge-doble mt-1">2×</span>
                                             </div>
                                         </div>
@@ -1309,7 +1567,7 @@ if (isset($conn)) {
                                     $totalGeneral += $detalle['monto'];
                                     $porcentaje = $totalConsumos > 0 ? round(($count / $totalConsumos) * 100, 1) : 0;
                                 ?>
-                                    <div class="resumen-dia <?php echo $detalle['desayunos'] > 0 ? 'multi-consumo' : ''; ?>">
+                                    <div class="resumen-dia <?php echo ($detalle['desayunos'] > 0 && $detalle['comidas'] > 0) ? 'ambos-cell' : ($detalle['desayunos'] > 0 ? 'desayuno-cell' : 'comida-cell'); ?>">
                                         <div>
                                             <strong><?php echo $diasEsp[$i]; ?></strong>
                                             <?php if ($porcentaje > 0): ?>

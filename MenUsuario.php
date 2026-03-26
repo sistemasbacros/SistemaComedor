@@ -75,7 +75,8 @@ $dia_semana = date('N');
 $hora_actual = date('H:i');
 
 // Bloquear desde jueves 13:00 hasta domingo 23:59
-if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
+if (($dia_semana == 4 && $hora_actual >= '12:38') || // Jueves desde 13:00
+ // $dia_semana == 4 || // Viernes completo
     $dia_semana == 5 || // Viernes completo
     $dia_semana == 6 || // Sábado completo
     ($dia_semana == 7 && $hora_actual <= '23:59')) { // Domingo hasta 23:59
@@ -706,6 +707,12 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                     <?php endif; ?>
                 </a>
             </li>
+            <!-- NUEVO MÓDULO: CONSUMOS DISPONIBLES -->
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-section="consumos">
+                    <i class="fas fa-hand-holding-heart"></i> Consumos Disponibles
+                </a>
+            </li>
             <li class="nav-item">
                 <a class="nav-link" href="#" data-section="consulta">
                     <i class="fas fa-search"></i> Consulta tus registros por semana
@@ -754,7 +761,7 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
             </div>
         </div>
 
-        <!-- Sección de Pedidos (ahora será la primera que se muestre) -->
+        <!-- Sección de Pedidos -->
         <div id="pedidos" class="section active">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center <?php echo $PEDIDOS_BLOQUEADOS ? 'blocked' : ''; ?>">
@@ -806,6 +813,38 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                             </iframe>
                         </div>
                     <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- NUEVA SECCIÓN: Consumos Disponibles -->
+        <div id="consumos" class="section">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <i class="fas fa-hand-holding-heart me-2"></i>Sistema de Consumos Disponibles
+                    </div>
+                    <div>
+                        <button class="btn btn-sm btn-primary" id="refresh-consumos-btn">
+                            <i class="fas fa-sync-alt me-1"></i>Actualizar
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0 position-relative">
+                    <!-- Indicador de carga para Consumos -->
+                    <div id="consumos-loading" class="loading-overlay">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">Cargando sistema de consumos disponibles...</div>
+                    </div>
+                    
+                    <!-- Contenedor del iframe -->
+                    <div class="report-iframe-container">
+                        <iframe src="http://desarollo-bacros/Comedor/aparta_consumo_modificado.php?integrated=true" 
+                                class="report-iframe" 
+                                id="consumos-iframe"
+                                onload="hideLoading('consumos-loading')">
+                        </iframe>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1058,6 +1097,17 @@ if (($dia_semana == 4 && $hora_actual >= '13:30') || // Jueves desde 13:00
                     iframe.src = iframe.src;
                 }
             <?php endif; ?>
+        });
+
+        // NUEVO: Botón de actualización para Consumos Disponibles
+        document.getElementById('refresh-consumos-btn').addEventListener('click', function() {
+            const iframe = document.getElementById('consumos-iframe');
+            const loading = document.getElementById('consumos-loading');
+            
+            if (loading && iframe) {
+                loading.style.display = 'flex';
+                iframe.src = iframe.src;
+            }
         });
 
         document.getElementById('refresh-consulta-btn').addEventListener('click', function() {
